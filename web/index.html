@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Radar da Plateia</title>
+<meta name="description" content="Monitoramento de atenção da plateia pela webcam, 100% local no navegador. Modos: Atenção, Exercício, Produtividade, Postura e Presença.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='28' fill='%23070c12' stroke='%233ee0ff' stroke-width='4'/%3E%3Cpath d='M32 32 L32 8 A24 24 0 0 1 51 20 Z' fill='%233ee0ff' opacity='.85'/%3E%3Ccircle cx='32' cy='32' r='5' fill='%233ee0ff'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body data-build="RADAR_V3_BUILD_20260901A">
+
+<header class="topo">
+  <div class="marca">
+    <div class="radar-logo" aria-hidden="true"><div class="sweep"></div></div>
+    <div>
+      <h1>RADAR DA PLATEIA</h1>
+      <p class="tag">processamento 100% local &mdash; nenhuma imagem sai deste computador</p>
+    </div>
+  </div>
+  <div class="pills">
+    <span class="pill" id="pill-camera"><i class="dot off"></i>C&Acirc;MERA</span>
+    <span class="pill" id="pill-motor"><i class="dot off"></i>MOTOR</span>
+    <span class="pill mono" id="pill-fps">&mdash; fps</span>
+  </div>
+</header>
+
+<main class="grade">
+  <!-- ============ COLUNA DO FEED ============ -->
+  <section class="painel feed-painel">
+    <div class="contadores" id="contadores"></div>
+    <div class="feed-wrap" id="feed-wrap">
+      <video id="video" playsinline muted></video>
+      <canvas id="overlay"></canvas>
+      <div class="canto c1"></div><div class="canto c2"></div><div class="canto c3"></div><div class="canto c4"></div>
+      <div class="feed-vazio" id="feed-vazio">
+        <div class="radar-logo grande"><div class="sweep"></div></div>
+        <p id="feed-msg">Escolha o modo, ajuste os avisos e clique em <strong>Ligar c&acirc;mera</strong>.</p>
+        <button class="btn-principal" id="btn-ligar">Ligar c&acirc;mera</button>
+      </div>
+      <button class="btn-tela-cheia" id="btn-fs" title="Tela cheia" hidden>&#x26F6;</button>
+    </div>
+  </section>
+
+  <!-- ============ COLUNA DE CONTROLE ============ -->
+  <aside class="controle">
+    <section class="painel">
+      <h2>Modos</h2>
+      <div class="modos" id="modos"></div>
+    </section>
+
+    <section class="painel">
+      <h2>Avisos e regra</h2>
+      <div class="campo">
+        <label for="inp-seg">Segundos da regra <span class="mono" id="lbl-seg"></span></label>
+        <input type="range" id="inp-seg" min="3" max="600" step="1">
+      </div>
+      <div class="campo">
+        <label>Tipo de aviso</label>
+        <div class="segmentos" id="seg-aviso">
+          <button data-v="apito">Apito</button>
+          <button data-v="voz">Voz</button>
+          <button data-v="silencioso">Silencioso</button>
+        </div>
+      </div>
+      <div class="campo dupla">
+        <div>
+          <label for="inp-gap">Intervalo entre avisos <span class="mono" id="lbl-gap"></span></label>
+          <input type="range" id="inp-gap" min="5" max="120" step="5">
+        </div>
+        <div>
+          <label for="inp-vol">Volume <span class="mono" id="lbl-vol"></span></label>
+          <input type="range" id="inp-vol" min="0" max="100" step="5">
+        </div>
+      </div>
+      <div class="campo">
+        <label for="sel-camera">C&acirc;mera</label>
+        <select id="sel-camera"><option value="">padr&atilde;o do sistema</option></select>
+      </div>
+      <div class="campo linha-fim">
+        <label class="check"><input type="checkbox" id="chk-espelho"> Espelhar imagem <small>(s&oacute; visual)</small></label>
+        <button class="btn-secundario" id="btn-parar" hidden>Parar</button>
+      </div>
+    </section>
+
+    <section class="painel" id="painel-stats" hidden>
+      <h2 id="stats-titulo">Estat&iacute;sticas</h2>
+      <div id="stats-corpo"></div>
+    </section>
+
+    <section class="painel">
+      <h2>Avisos emitidos <button class="btn-limpar" id="btn-limpar">limpar</button></h2>
+      <ol class="log" id="log"><li class="vazio">nenhum aviso ainda</li></ol>
+    </section>
+  </aside>
+</main>
+
+<footer class="rodape">
+  <span>Radar da Plateia &middot; Expert Integrado &middot; a c&acirc;mera &eacute; processada dentro do seu navegador</span>
+  <span class="mono" id="build"></span>
+</footer>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>

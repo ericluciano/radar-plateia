@@ -2,6 +2,13 @@
 
 Objetivo: app local que filma a plateia de um evento pela webcam e AVISA POR VOZ no PC quando alguem fica 10s+ sem olhar pra frente (cabeca baixa, virado pro lado ou rosto que some), falando a posicao estimada ("fileira X, cadeira Y contando da esquerda do Eric"). Pedido do Eric ao vivo na Imersao 01/09/2026. v1 apitava; Eric mandou matar o apito (irritante) e trocar por voz com posicao — regra de 10s.
 
+## v3 — app web (`web/`)
+
+Port completo pro navegador (pedido do Eric 01/09/2026, ao vivo): SPA estatica em `web/` — HTML+JS puro, MediaPipe tasks-vision VENDORIZADO (wasm + blaze_face_short_range.tflite em `web/vendor/`, ~23MB, nada baixa de CDN e NENHUMA imagem sai da maquina). 5 modos clicaveis sobre o mesmo engine (Atencao, Exercicio, Produtividade, Postura, Presenca), aviso configuravel (voz speechSynthesis / apito WebAudio / silencioso), segundos da regra por modo, gap, volume, seletor de camera, espelho. Config persiste em localStorage (`radar.cfg.v1`). Hook de teste automatizado: `window.__radar.estado` (build, engineOk, tracks, erros).
+- Testar local: servidor estatico com MIME certo pra `.mjs`/`.wasm` (python http.server pode servir .mjs como text/plain e quebrar o import — usar node ou vercel dev).
+- Deploy alvo: Vercel `--prod` + dominio radar.ericluciano.com.br (gate de producao — so com OK do Eric).
+- Auto-degrade: maquina lenta (>150ms/frame) desliga a varredura por tiles sozinha e loga no painel.
+
 ## Escopo
 - Deteccao de rosto MediaPipe full-range + varredura em 4 quadrantes (tiles) pra pegar rosto pequeno no fundo da sala.
 - "Nao olhando pra frente" = geometria nariz-olhos normalizada pela distancia interocular, DOIS eixos: pitch (cabeca baixa) e yaw (virado pro lado), ambos comparados a baseline auto-calibrado POR ROSTO nos primeiros 3s — robusto a altura da camera, posicao na sala e pessoa.
