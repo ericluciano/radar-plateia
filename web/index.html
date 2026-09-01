@@ -11,7 +11,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="styles.css">
 </head>
-<body data-build="RADAR_V3_BUILD_20260901A">
+<body data-build="RADAR_V3_BUILD_20260901B">
 
 <header class="topo">
   <div class="marca">
@@ -75,6 +75,15 @@
           <label for="inp-vol">Volume <span class="mono" id="lbl-vol"></span></label>
           <input type="range" id="inp-vol" min="0" max="100" step="5">
         </div>
+      </div>
+      <div class="campo">
+        <label>Alcance da detec&ccedil;&atilde;o</label>
+        <div class="segmentos" id="seg-alcance">
+          <button data-v="perto">Perto</button>
+          <button data-v="medio">M&eacute;dio</button>
+          <button data-v="longe">Longe</button>
+        </div>
+        <small class="dica">Longe varre o fundo da sala por zonas (usa mais m&aacute;quina)</small>
       </div>
       <div class="campo">
         <label for="sel-camera">C&acirc;mera</label>

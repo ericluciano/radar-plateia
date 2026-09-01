@@ -1,7 +1,7 @@
 // Radar da Plateia — v3 web. Tudo roda NO NAVEGADOR: nenhuma imagem sai da máquina.
 import { FaceDetector, FilesetResolver } from "./vendor/tasks-vision/vision_bundle.mjs";
 
-const BUILD = "RADAR_V3_BUILD_20260901A";
+const BUILD = "RADAR_V3_BUILD_20260901B";
 
 // ------------------------------------------------------------------ modos
 const MODOS = {
@@ -53,12 +53,12 @@ let fps = 0;
 let ultimoAviso = 0;
 let amostrasPresenca = [];
 let picoPresenca = 0;
-let tilesLigados = true;
+let tileCursor = 0;
 let custoDeteccao = [];
 const erros = [];
 
 const ENG = {
-  conf: 0.35, minFacePx: 22, baselineS: 3, recoverS: 2,
+  conf: 0.28, minFacePx: 22, baselineS: 3, recoverS: 2,
   yawDev: 0.42, ghostStable: 5, ghostTtl: 16,
   pitchFrontalAbs: 0.35, // modo exercício: rosto de frente (absoluto)
   moveFrac: 0.14,        // modo postura: deslocamento mínimo (fração da largura do rosto)
@@ -71,7 +71,7 @@ const ctx = overlay.getContext("2d");
 
 // ------------------------------------------------------------------ config persistente
 function carregarCfg() {
-  const base = { modo: "atencao", aviso: "voz", gap: 20, volume: 70, espelho: false, segundos: {} };
+  const base = { modo: "atencao", aviso: "voz", gap: 20, volume: 70, espelho: false, alcance: "longe", segundos: {} };
   try {
     const s = JSON.parse(localStorage.getItem("radar.cfg.v1") || "{}");
     return { ...base, ...s, segundos: { ...(s.segundos || {}) } };
@@ -183,13 +183,30 @@ function iou(a, b) {
   const inter = (x2 - x1) * (y2 - y1);
   return inter / (a[2] * a[3] + b[2] * b[3] - inter);
 }
+function zonasDoAlcance(W, H) {
+  // "medio": 2x2 zonas de 56%; "longe": 3x3 zonas de 40% (zoom maior alcanca o fundo da sala)
+  const n = cfg.alcance === "longe" ? 3 : cfg.alcance === "medio" ? 2 : 0;
+  if (!n) return [];
+  const frac = n === 3 ? 0.40 : 0.56;
+  const tw = Math.round(W * frac), th = Math.round(H * frac);
+  const zonas = [];
+  for (let iy = 0; iy < n; iy++) for (let ix = 0; ix < n; ix++)
+    zonas.push([Math.round(ix * (W - tw) / (n - 1 || 1)), Math.round(iy * (H - th) / (n - 1 || 1)), tw, th]);
+  return zonas;
+}
 function detectarTudo() {
   const W = video.videoWidth, H = video.videoHeight;
   const saida = [];
   detectarRegiao(0, 0, W, H, saida);
-  if (tilesLigados) {
-    const tw = Math.round(W * 0.56), th = Math.round(H * 0.56);
-    for (const ox of [0, W - tw]) for (const oy of [0, H - th]) detectarRegiao(ox, oy, tw, th, saida);
+  const zonas = zonasDoAlcance(W, H);
+  if (zonas.length) {
+    // 3x3 roda em rodizio de 3 zonas por volta: cobre tudo a cada ~3 voltas sem pesar
+    const porVolta = zonas.length <= 4 ? zonas.length : 3;
+    for (let k = 0; k < porVolta; k++) {
+      const [sx, sy, sw, sh] = zonas[tileCursor % zonas.length];
+      tileCursor++;
+      detectarRegiao(sx, sy, sw, sh, saida);
+    }
   }
   saida.sort((a, b) => b.score - a.score);
   const unicos = [];
@@ -281,7 +298,7 @@ function atualizarTracks(dets, agora, W, H) {
   }
   tracks = tracks.filter(tr => {
     tr.sumido = agora - tr.visto;
-    if (tr.sumido > 0.7) {
+    if (tr.sumido > 1.6) { // folga pro rodizio de zonas do alcance Longe
       const cx = tr.box[0] + tr.box[2] / 2, cy = tr.box[1] + tr.box[3] / 2;
       const naBorda = cx < W * 0.06 || cx > W * 0.94 || cy < H * 0.06 || cy > H * 0.94;
       const estavel = tr.visto - tr.inicio >= ENG.ghostStable;
@@ -471,8 +488,11 @@ async function loop() {
   const custo = performance.now() - t0;
   custoDeteccao.push(custo); if (custoDeteccao.length > 30) custoDeteccao.shift();
   const medio = custoDeteccao.reduce((s, c) => s + c, 0) / custoDeteccao.length;
-  if (tilesLigados && custoDeteccao.length === 30 && medio > 150) {
-    tilesLigados = false; registrarLog("máquina lenta: varredura de fundo desligada (rostos pequenos ficam mais difíceis)");
+  if (custoDeteccao.length === 30 && medio > 170 && cfg.alcance !== "perto") {
+    cfg.alcance = cfg.alcance === "longe" ? "medio" : "perto";
+    custoDeteccao = [];
+    registrarLog(`máquina lenta: alcance reduzido pra ${cfg.alcance === "medio" ? "Médio" : "Perto"}`);
+    aplicarUi();
   }
   fps = 1000 / Math.max(custo, 1);
   $("pill-fps").textContent = `${fps.toFixed(0)} fps`;
@@ -493,7 +513,7 @@ async function ligarCamera() {
     const constraints = {
       video: {
         deviceId: cfg.camera ? { exact: cfg.camera } : undefined,
-        width: { ideal: 1280 }, height: { ideal: 720 },
+        width: { ideal: 1920 }, height: { ideal: 1080 },
       }, audio: false,
     };
     const stream = await navigator.mediaDevices.getUserMedia(constraints);
@@ -567,6 +587,8 @@ function aplicarUi() {
   feedWrap.classList.toggle("espelhado", cfg.espelho);
   document.querySelectorAll("#seg-aviso button").forEach(b =>
     b.classList.toggle("ativo", b.dataset.v === cfg.aviso));
+  document.querySelectorAll("#seg-alcance button").forEach(b =>
+    b.classList.toggle("ativo", b.dataset.v === cfg.alcance));
   renderContadores(0, 0); renderStats();
 }
 
@@ -587,6 +609,11 @@ $("seg-aviso").addEventListener("click", (ev) => {
   cfg.aviso = b.dataset.v; salvarCfg(); aplicarUi();
   if (cfg.aviso === "apito") apitar();
   if (cfg.aviso === "voz") falar("Avisos por voz.");
+});
+$("seg-alcance").addEventListener("click", (ev) => {
+  const b = ev.target.closest("button"); if (!b) return;
+  cfg.alcance = b.dataset.v; tileCursor = 0; custoDeteccao = [];
+  salvarCfg(); aplicarUi();
 });
 $("inp-gap").addEventListener("input", () => { cfg.gap = Number($("inp-gap").value); $("lbl-gap").textContent = cfg.gap + "s"; salvarCfg(); });
 $("inp-vol").addEventListener("input", () => { cfg.volume = Number($("inp-vol").value); $("lbl-vol").textContent = cfg.volume + "%"; salvarCfg(); });

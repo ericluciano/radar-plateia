@@ -176,6 +176,7 @@ video[hidden] { display: none; }
 .campo.linha-fim { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
 .check { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--txt) !important; cursor: pointer; }
 .check small { color: var(--dim); }
+.dica { display: block; color: var(--dim); font-size: 11px; margin-top: 5px; }
 
 input[type="range"] { width: 100%; accent-color: var(--cyan); background: transparent; }
 select {
