@@ -1,12 +1,14 @@
 # radar-plateia
 
-Objetivo: app local que filma a plateia de um evento pela webcam e apita no PC quando alguem dispersa (cabeca baixa em celular/teclado por tempo sustentado, ou rosto que some da camera). Pedido do Eric ao vivo na Imersao 01/09/2026.
+Objetivo: app local que filma a plateia de um evento pela webcam e AVISA POR VOZ no PC quando alguem fica 10s+ sem olhar pra frente (cabeca baixa, virado pro lado ou rosto que some), falando a posicao estimada ("fileira X, cadeira Y contando da esquerda do Eric"). Pedido do Eric ao vivo na Imersao 01/09/2026. v1 apitava; Eric mandou matar o apito (irritante) e trocar por voz com posicao — regra de 10s.
 
 ## Escopo
 - Deteccao de rosto MediaPipe full-range + varredura em 4 quadrantes (tiles) pra pegar rosto pequeno no fundo da sala.
-- "Cabeca baixa" = proxy geometrico (distancia vertical nariz-olhos / distancia entre olhos) comparado a um baseline auto-calibrado POR ROSTO nos primeiros 3s — robusto a altura da camera e a pessoa.
-- Disperso = cabeca baixa sustentada 6s+ (ajustavel com +/-) OU rosto estavel que sumiu (ghost, pessoa olhou totalmente pra baixo).
-- Apito winsound (2 tons) com cooldown de 12s; teclas m/p/+-/1-9; log de apitos em logs/eventos.log.
+- "Nao olhando pra frente" = geometria nariz-olhos normalizada pela distancia interocular, DOIS eixos: pitch (cabeca baixa) e yaw (virado pro lado), ambos comparados a baseline auto-calibrado POR ROSTO nos primeiros 3s — robusto a altura da camera, posicao na sala e pessoa.
+- Disperso = 10s+ sustentado (ajustavel com +/-) OU rosto estavel que sumiu (ghost) ha 10s+.
+- Aviso = frase falada via falar.ps1 (edge-tts Antonio, fallback SAPI; texto vai por ARQUIVO UTF-8 pra acentuacao nao corromper; NAO mexe no volume master, diferente do avisar-voz). Worker serializado com gap minimo de 20s entre falas e 1 aviso por pessoa por episodio (re-avisa so depois de recuperar e dispersar de novo).
+- Fileira/cadeira: agrupamento 1-D dos rostos por altura no quadro (linha de baixo = fileira 1, mais perto da camera); cadeira = ordem x da esquerda (visao da camera = visao do Eric de frente pra plateia). E ESTIMATIVA — sala sem grade perfeita erra.
+- Log de avisos em logs/eventos.log; teclas m/p/+-.
 
 ## Fora de escopo (de proposito)
 - NAO grava video, NAO tira foto, NAO identifica pessoas, NAO manda dado pra fora. Privacidade by design — manter assim.
