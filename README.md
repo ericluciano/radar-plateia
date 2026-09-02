@@ -16,4 +16,4 @@ Avisos ficam registrados em `logs/eventos.log`. Detalhes tecnicos: `CLAUDE.md`.
 Codigo em `web/`: app de navegador com 5 modos (Atencao, Exercicio, Produtividade, Postura, Presenca), varias cameras
 na mesma tela, aviso por voz/apito, relatorio de sessao com CSV e medidor de ruido. Nada sai da maquina.
 - Testes unitarios: `cd web && npm test` | E2E: `python web/tests/e2e/run_all.py` (ver `web/tests/e2e/README.md`)
-- Roteiro e decisoes pendentes: `docs/ROADMAP.md`
+- Roteiro, decisoes tomadas e proximas entregas: `docs/ROADMAP.md`

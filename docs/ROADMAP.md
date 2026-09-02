@@ -23,12 +23,19 @@ App de navegador (radar.ericluciano.com.br) que analisa a câmera 100% na máqui
 5. Sons de aviso alternativos e aviso por voz em outros idiomas (Web Speech já suporta).
 6. Modo tela cheia "telão" só com contadores e nota (pra projetar sem mostrar a câmera).
 
-## Decisões do Eric (bloqueiam implementação)
-1. **Identificar quem é quem** (Baú, academia): (A) por **posto/assento** — o sistema sabe que "posto 3 = João" por um mapa que o cliente preenche; sem biometria, LGPD leve; funciona em linha de produção e sala de aula com lugar fixo. (B) **reconhecimento facial** com foto cadastrada — biometria = dado sensível (LGPD art. 11), exige consentimento explícito e política; tecnicamente viável no navegador (embeddings faciais, comparação local). Recomendação: começar por A; B só com contrato/consentimento do cliente.
-2. **EPI**: já existe projeto próprio em andamento (card Brain "Monitor de EPI", epi.ericluciano.com.br). Integrar como modo do Radar ou manter separado? Recomendação: manter separado até o modelo de EPI estar validado; depois vira modo.
-3. **Palavras de ativação** (voz): o microfone já mede ruído; reconhecer palavras exige Web Speech (Chrome, online) ou modelo local. Falta definir O QUE a palavra dispara (marcar momento no relatório? silenciar avisos? contar "perguntas"?).
-4. **Versão servidor** (câmeras IP/CFTV, várias por prédio, funcionar sem aba aberta): arquitetura sobre Frigate + nossa camada de modos. Quando algum cliente (academia/Baú) confirmar câmeras IP.
-5. **Repositório público** (open source): passa pelo gate de PII (skill repo-vitrine); definir licença.
+## Decisões tomadas pelo Eric (02/09/2026)
+1. **Identificar quem é quem — OS DOIS.** Primeiro por **posto/assento** (cliente mapeia "posto 3 = João"; sem biometria). Depois **reconhecimento facial com foto cadastrada** onde o cliente assinar consentimento (biometria = dado sensível, LGPD art. 11) — embeddings faciais comparados localmente no navegador, foto nunca sai da máquina do cliente.
+2. **EPI vira modo "Segurança" DENTRO do Radar.** O app separado "Monitor de EPI" (epi.ericluciano.com.br) não está em uso e foi encerrado; tudo se mescla aqui. Detecção de capacete/colete/óculos/luva por pessoa (modelo YOLO de EPI rodando no navegador, mesmo padrão dos outros modos) com aviso e relatório.
+3. **Áudio: alerta por som, sem palavra de ativação.** Palavras de ativação saem do roteiro (Eric: "se eu estiver viajando, tira fora"). Fica: **grito/pico de ruído dispara alerta** (já dá com o medidor atual). Gravar o áudio do ambiente (para funcionário em serviço, com LGPD): NÃO contínuo — no máximo trecho curto em volta de um evento, opt-in, com aviso na tela; entra só quando um cliente pedir.
+4. **Versão servidor: não agora.** Tudo local (navegador). Reabre quando um cliente confirmar câmeras IP.
+5. **Repositório público no padrão da casa:** GitHub público "para os alunos" (instala quem precisar), com instruções de instalação, após varredura de dados pessoais (skill repo-vitrine). Licença **MIT** (o único precedente explícito nos nossos repos é o clickup-mcp, MIT).
+
+## Próximas entregas (ordem sugerida, sem nova decisão)
+1. Modo Segurança (EPI) — modelo, célula por câmera, aviso "posto X sem capacete", coluna no relatório.
+2. Identificação por posto/assento — mapa por câmera (arrastar caixas de posto sobre a imagem), nome nos avisos e no relatório de produtividade.
+3. Alerta por grito/pico de ruído + heatmap por fileira + curva com pontos de queda.
+4. Reconhecimento facial com consentimento (cadastro de foto local, embeddings, LGPD por cliente).
+5. Publicar o repositório (repo-vitrine + MIT).
 
 ## Limites conhecidos
 - Modelo de rosto embarcado é de curto alcance; o alcance Longe compensa por zonas mas depende de resolução e ângulo da câmera (a etiqueta CÂMERA mostra a resolução real).
