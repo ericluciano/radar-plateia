@@ -149,9 +149,12 @@ export function rgb2hsv(r, g, b) {
   return [h, mx === 0 ? 0 : d / mx, mx];
 }
 
-/** Pixel de alta visibilidade: amarelo-verde fluorescente (matiz 40-100) ou laranja (10-40), ambos saturados e claros. */
+/**
+ * Pixel de alta visibilidade: amarelo-verde fluorescente (matiz 50-100) ou laranja (10-50) MUITO saturado.
+ * Pele fica em matiz 10-45 com saturação até ~0.65: o laranja exige s >= 0.70 pra pele bronzeada/sombreada não virar colete.
+ */
 export const altaVisibilidade = (h, s, v) =>
-  (h >= 40 && h <= 100 && s >= 0.45 && v >= 0.45) || (h >= 10 && h < 40 && s >= 0.55 && v >= 0.45);
+  (h >= 50 && h <= 100 && s >= 0.45 && v >= 0.45) || (h >= 10 && h < 50 && s >= 0.70 && v >= 0.55);
 
 /** Frações de cor numa região RGBA (Uint8ClampedArray). `passo` = amostra 1 a cada N pixels. */
 export function analisarCores(data, passo = 2) {
@@ -175,6 +178,36 @@ export function regioesEpi([x, y, w, h]) {
   return inteiro
     ? { colete: [x + 0.18 * w, y + 0.14 * h, 0.64 * w, 0.24 * h], capacete: [x + 0.28 * w, y, 0.44 * w, 0.11 * h] }
     : { colete: [x + 0.18 * w, y + 0.28 * h, 0.64 * w, 0.34 * h], capacete: [x + 0.28 * w, y + 0.01 * h, 0.44 * w, 0.19 * h] };
+}
+
+/**
+ * Regiões ANCORADAS no rosto (bem mais robusto que a proporção da caixa, que erra em pessoa sentada/perto da câmera):
+ * capacete = da testa pra cima; colete = abaixo do queixo/pescoço, largura de ombros. Tudo recortado à caixa da pessoa.
+ * Devolve null quando o torso não cabe na caixa (rosto no pé da caixa) — aí o chamador usa regioesEpi(caixa).
+ */
+export function regioesEpiPorRosto([x, y, w, h], [fx, fy, fw, fh]) {
+  const cx = fx + fw / 2;
+  const clip = ([rx, ry, rw, rh]) => {
+    const x1 = Math.max(rx, x), y1 = Math.max(ry, y), x2 = Math.min(rx + rw, x + w), y2 = Math.min(ry + rh, y + h);
+    return [x1, y1, Math.max(1, x2 - x1), Math.max(0, y2 - y1)];
+  };
+  const colete = clip([cx - 1.2 * fw, fy + 1.25 * fh, 2.4 * fw, 1.7 * fh]);
+  if (colete[3] < 0.5 * fh) return null;
+  const capacete = clip([cx - 0.7 * fw, fy - 0.85 * fh, 1.4 * fw, 0.95 * fh]);
+  if (capacete[3] < 1) capacete[3] = 1;
+  return { colete, capacete };
+}
+
+/** Rosto que pertence à pessoa: centro dentro da caixa, na metade de cima; se houver mais de um, o maior. */
+export function rostoDaPessoa([x, y, w, h], rostos) {
+  let melhor = null;
+  for (const r of rostos) {
+    const b = r.box || r;
+    const cx = b[0] + b[2] / 2, cy = b[1] + b[3] / 2;
+    if (cx < x || cx > x + w || cy < y || cy > y + 0.65 * h) continue;
+    if (!melhor || b[2] > melhor[2]) melhor = b;
+  }
+  return melhor;
 }
 
 /** Uma amostra (um quadro): frações do torso e do topo viram tem/não tem por item, segundo o rigor. */

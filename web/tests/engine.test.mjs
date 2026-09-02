@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import {
   iou, contencao, dedupe, geometria, mediana, formataDur, zonas,
   fileirasECadeiras, classificarNota, resumoSessao, csvRelatorio, valido, SCORE_MIN,
-  RIGOR_EPI, rgb2hsv, altaVisibilidade, analisarCores, regioesEpi, amostraEpi, estadoEpi, rotuloEpi, fraseEpi, casarPorIou,
+  RIGOR_EPI, rgb2hsv, altaVisibilidade, analisarCores, regioesEpi, regioesEpiPorRosto, rostoDaPessoa, amostraEpi, estadoEpi,
+  rotuloEpi, fraseEpi, casarPorIou,
 } from "../engine.js";
 
 // pixels RGBA repetidos n vezes
@@ -12,7 +13,8 @@ const pixels = (...blocos) => {
   for (const [rgb, n] of blocos) for (let i = 0; i < n; i++) out.push(rgb[0], rgb[1], rgb[2], 255);
   return new Uint8ClampedArray(out);
 };
-const AMARELO_HV = [204, 255, 0], LARANJA_HV = [255, 103, 0], MARINHO = [20, 30, 90], BRANCO = [250, 250, 250], PELE = [224, 172, 140], GRAMA = [60, 160, 60];
+const AMARELO_HV = [204, 255, 0], LARANJA_HV = [255, 103, 0], MARINHO = [20, 30, 90], BRANCO = [250, 250, 250],
+      PELE = [224, 172, 140], PELE_SOMBRA = [170, 100, 60], GRAMA = [60, 160, 60];
 
 test("iou: caixas iguais = 1, separadas = 0, metade sobreposta ≈ 1/3", () => {
   assert.equal(iou([0, 0, 10, 10], [0, 0, 10, 10]), 1);
@@ -147,8 +149,27 @@ test("altaVisibilidade: amarelo e laranja fluorescentes sim; marinho, pele, gram
   assert.equal(altaVisibilidade(...rgb2hsv(...LARANJA_HV)), true);
   assert.equal(altaVisibilidade(...rgb2hsv(...MARINHO)), false);
   assert.equal(altaVisibilidade(...rgb2hsv(...PELE)), false, "pele é laranja pouco saturado");
+  assert.equal(altaVisibilidade(...rgb2hsv(...PELE_SOMBRA)), false, "pele bronzeada/sombreada (s≈0.65) não é colete laranja");
   assert.equal(altaVisibilidade(...rgb2hsv(...GRAMA)), false, "verde de grama não é fluorescente");
   assert.equal(altaVisibilidade(...rgb2hsv(...BRANCO)), false);
+});
+
+test("regioesEpiPorRosto: colete abaixo do queixo, capacete acima da testa, tudo dentro da caixa; rosto no pé = null", () => {
+  const caixa = [60, 20, 160, 400], rosto = [100, 50, 60, 60];
+  const r = regioesEpiPorRosto(caixa, rosto);
+  assert.ok(r.colete[1] >= 110, "colete começa abaixo do queixo");
+  assert.ok(r.capacete[1] + r.capacete[3] <= 60, "capacete termina na testa");
+  assert.equal(r.capacete[1], 20, "recortado ao topo da caixa");
+  for (const [x, y, w, h] of Object.values(r)) assert.ok(x >= 60 && y >= 20 && x + w <= 220 + 1e-9 && y + h <= 420 + 1e-9 && w > 0 && h > 0);
+  assert.equal(regioesEpiPorRosto(caixa, [100, 380, 60, 60]), null, "rosto no pé da caixa: torso não cabe");
+});
+
+test("rostoDaPessoa: rosto com centro na metade de cima da caixa; maior vence; fora = null", () => {
+  const caixa = [0, 0, 200, 600];
+  const pequeno = { box: [80, 40, 30, 30] }, grande = { box: [60, 60, 80, 80] }, embaixo = { box: [80, 500, 40, 40] }, fora = { box: [400, 40, 50, 50] };
+  assert.deepEqual(rostoDaPessoa(caixa, [pequeno, grande, embaixo, fora]), grande.box);
+  assert.equal(rostoDaPessoa(caixa, [embaixo, fora]), null);
+  assert.deepEqual(rostoDaPessoa(caixa, [[10, 10, 20, 20]]), [10, 10, 20, 20], "aceita caixa nua");
 });
 
 test("analisarCores: frações por região, passo de amostragem e região vazia", () => {

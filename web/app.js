@@ -2,7 +2,7 @@
 import { FaceDetector, ObjectDetector, FilesetResolver } from "./vendor/tasks-vision/vision_bundle.mjs";
 import {
   valido, dedupe, geometria, mediana, formataDur, zonas, fileirasECadeiras, resumoSessao, csvRelatorio,
-  analisarCores, regioesEpi, amostraEpi, estadoEpi, rotuloEpi, fraseEpi, casarPorIou,
+  analisarCores, regioesEpi, regioesEpiPorRosto, rostoDaPessoa, amostraEpi, estadoEpi, rotuloEpi, fraseEpi, casarPorIou,
 } from "./engine.js";
 
 const BUILD = "RADAR_V3_BUILD_20260902F";
@@ -287,8 +287,8 @@ function detectarPessoas(cam) {
 }
 const amostraCanvas = document.createElement("canvas");
 const amostraCtx = amostraCanvas.getContext("2d", { willReadFrequently: true });
-/** Lê as cores do torso (colete) e do topo (capacete) de cada pessoa numa cópia reduzida do quadro. */
-function amostrarEpi(cam, dets) {
+/** Lê as cores do torso (colete) e do topo (capacete) de cada pessoa numa cópia reduzida do quadro. Regiões ancoradas no rosto quando há um. */
+function amostrarEpi(cam, dets, rostos = []) {
   if (!dets.length) return;
   const W = cam.video.videoWidth, H = cam.video.videoHeight;
   const escala = Math.min(1, 640 / W);
@@ -301,7 +301,10 @@ function amostrarEpi(cam, dets) {
     return analisarCores(amostraCtx.getImageData(gx, gy, gw, gh).data);
   };
   for (const d of dets) {
-    d.regioes = regioesEpi(d.box);
+    const rosto = rostoDaPessoa(d.box, rostos);
+    const porRosto = rosto ? regioesEpiPorRosto(d.box, rosto) : null;
+    d.regioes = porRosto || regioesEpi(d.box);
+    d.ancora = porRosto ? "rosto" : "caixa";
     d.epi = amostraEpi({ torso: pega(d.regioes.colete), topo: pega(d.regioes.capacete) }, cfg.epi.rigor);
   }
 }
@@ -381,14 +384,14 @@ function atualizarTracks(cam, dets, agora) {
 function atualizarTracksPessoas(cam, dets, agora) {
   const { pares, livres } = casarPorIou(cam.tracks, dets, 0.2);
   for (const [tr, d] of pares) {
-    tr.box = d.box; tr.visto = agora; tr.regioes = d.regioes;
+    tr.box = d.box; tr.visto = agora; tr.regioes = d.regioes; tr.ancora = d.ancora;
     tr.score = 0.8 * tr.score + 0.2 * d.score;
     tr.hist.push(d.epi); if (tr.hist.length > 8) tr.hist.shift();
   }
   for (const d of livres) {
     cam.tracks.push({
       id: cam.proximoId++, box: d.box, kps: [], score: d.score, inicio: agora, visto: agora,
-      hist: [d.epi], regioes: d.regioes, faltando: [], semEpiDesde: null, avisado: false,
+      hist: [d.epi], regioes: d.regioes, ancora: d.ancora, faltando: [], semEpiDesde: null, avisado: false,
       ghost: false, sumido: 0, focoS: 0, totalS: 0, semEpiS: 0, ultimoTick: agora,
     });
   }
@@ -582,7 +585,18 @@ class Cam {
     let dets, r;
     if (MODOS[modo].pessoas) {
       if (!detectorPessoas) { garantirDetectorPessoas(); return { bons: 0, ruins: 0 }; }
-      dets = detectarPessoas(this); amostrarEpi(this, dets);
+      dets = detectarPessoas(this);
+      // rosto ancora as regiões de colete/capacete (proporção da caixa erra em gente sentada/perto):
+      // procura o rosto DENTRO da metade de cima de cada pessoa (recorte = rosto maior pro modelo de curto alcance)
+      const rostos = [];
+      const W = this.video.videoWidth, H = this.video.videoHeight;
+      for (const d of dets) {
+        const [bx, by, bw, bh] = d.box;
+        const sx = Math.max(0, Math.round(bx)), sy = Math.max(0, Math.round(by));
+        const sw = Math.min(W - sx, Math.round(bw)), sh = Math.min(H - sy, Math.round(bh * 0.7));
+        if (sw > 16 && sh > 16) detectarRegiao(this, sx, sy, sw, sh, rostos);
+      }
+      amostrarEpi(this, dets, rostos.filter(valido));
       this.lastFaces = dets.length;
       atualizarTracksPessoas(this, dets, agora);
       r = avaliarSeguranca(this, agora);
@@ -882,7 +896,7 @@ window.__radar = {
       epi: { ...cfg.epi, segundos: segundosDoModo() },
       cams: cams.map(c => ({ nome: c.nome, rodando: c.rodando, res: c.res, lastFaces: c.lastFaces,
                              tracks: c.tracks.length, validos: c.tracks.filter(valido).length,
-                             pessoas: c.tracks.map(t => ({ id: t.id, estado: t.estado ?? null, faltando: t.faltando ?? null, hist: t.hist?.length ?? 0 })),
+                             pessoas: c.tracks.map(t => ({ id: t.id, estado: t.estado ?? null, faltando: t.faltando ?? null, hist: t.hist?.length ?? 0, ancora: t.ancora ?? null })),
                              bons: c.bons, ruins: c.ruins, fps: Number(c.fps.toFixed(1)), erro: c.erro,
                              videoT: Number(c.video.currentTime.toFixed(1)), videoRs: c.video.readyState,
                              trackState: c.stream?.getVideoTracks()[0]?.readyState ?? null })),
