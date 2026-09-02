@@ -4,3 +4,6 @@ __pycache__/
 *.pyc
 .vercel/
 .env.local
+*.y4m
+web/tests/e2e/saida/
+web/node_modules/

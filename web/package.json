@@ -1,0 +1,11 @@
+{
+  "name": "radar-plateia-web",
+  "private": true,
+  "type": "module",
+  "description": "Radar da Plateia — monitoramento de atenção/presença pela câmera, 100% no navegador",
+  "scripts": {
+    "test": "node --test tests/*.test.mjs",
+    "test:e2e": "python tests/e2e/run_all.py",
+    "serve": "python -m http.server 8790"
+  }
+}

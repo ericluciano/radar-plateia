@@ -11,7 +11,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="styles.css">
 </head>
-<body data-build="RADAR_V3_BUILD_20260902D">
+<body data-build="RADAR_V3_BUILD_20260902E">
 
 <header class="topo">
   <div class="marca">
@@ -84,10 +84,21 @@
         </div>
         <small class="dica">Longe varre o fundo da sala por zonas (usa mais m&aacute;quina)</small>
       </div>
+      <div class="campo">
+        <label class="check"><input type="checkbox" id="chk-ruido"> Medir ru&iacute;do da sala <small>(usa o microfone; s&oacute; o n&iacute;vel, nada &eacute; gravado)</small></label>
+        <div class="ruido" id="ruido-medidor" hidden><div class="ruido-bar"><i id="ruido-fill"></i></div><span class="mono" id="ruido-val">&mdash;</span></div>
+      </div>
       <div class="campo linha-fim">
         <label class="check"><input type="checkbox" id="chk-espelho"> Espelhar imagem <small>(s&oacute; visual)</small></label>
         <button class="btn-secundario" id="btn-parar" hidden>Parar</button>
       </div>
+    </section>
+
+    <section class="painel" id="painel-relatorio">
+      <h2>Relat&oacute;rio da sess&atilde;o <button class="btn-limpar" id="btn-csv" disabled title="Baixa a planilha com a evolu&ccedil;&atilde;o e os avisos">baixar CSV</button></h2>
+      <div class="rel-grid" id="rel-grid"></div>
+      <canvas id="curva" class="curva"></canvas>
+      <p class="dica">Come&ccedil;a a contar quando as c&acirc;meras ligam; ao parar, fica dispon&iacute;vel pra exportar.</p>
     </section>
 
     <section class="painel">
