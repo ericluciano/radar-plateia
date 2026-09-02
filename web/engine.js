@@ -321,6 +321,73 @@ export function normalizarRect(x1, y1, x2, y2, W, H) {
   return [r4(ax), r4(ay), r4(w), r4(h)];
 }
 
+// ------------------------------------------------------------------ presença automática e histórico de sessões
+
+/** Mediana de 3 vizinhos: tira o pisca de detecção antes de contar entradas/saídas. */
+export const mediana3 = (arr) => arr.map((v, i) => i === 0 || i === arr.length - 1 ? v : mediana([arr[i - 1], v, arr[i + 1]]));
+
+/** Presença: entradas/saídas (deltas da série filtrada), pico e quando, 1ª e última amostra com gente. */
+export function resumoPresenca(amostras) {
+  const serie = mediana3(amostras.map(a => a.pessoas));
+  let entradas = 0, saidas = 0, pico = 0, picoT = null, primeiraT = null, ultimaT = null;
+  serie.forEach((n, i) => {
+    if (i > 0) { const d = n - serie[i - 1]; if (d > 0) entradas += d; else saidas -= d; }
+    if (n > pico) { pico = n; picoT = amostras[i].t; }
+    if (n > 0) { primeiraT ??= amostras[i].t; ultimaT = amostras[i].t; }
+  });
+  return { entradas, saidas, pico, picoT, primeiraT, ultimaT };
+}
+
+/** Registro compacto de uma sessão pro histórico local (IndexedDB): amostras, avisos, picos e heat por câmera. */
+export function compactarSessao(sessao, modo, cams) {
+  const r1 = (v) => Math.round(v * 10) / 10;
+  return {
+    id: sessao.inicioWall, inicioWall: sessao.inicioWall, modo, passoS: sessao.passoS, inicio: sessao.inicio,
+    fimT: sessao.amostras.length ? sessao.amostras[sessao.amostras.length - 1].t : sessao.inicio,
+    amostras: sessao.amostras.map(a => ({ t: r1(a.t), pessoas: a.pessoas, ok: a.ok, alerta: a.alerta, ruido: a.ruido ?? null })),
+    avisos: sessao.avisos.map(v => ({ t: r1(v.t), texto: v.texto })),
+    picos: sessao.picos || 0,
+    heat: cams.map(c => ({ nome: c.nome, celulas: [...(c.heat ? c.heat.values() : [])].map(x => ({ ...x })) })),
+  };
+}
+export function expandirHeat(celulas) {
+  const m = new Map();
+  for (const c of celulas || []) m.set(`${c.f}-${c.c}`, { ...c });
+  return m;
+}
+
+// ------------------------------------------------------------------ reconhecimento facial (com consentimento): comparação de assinaturas
+
+export function distanciaEuclidiana(a, b) {
+  let s = 0;
+  for (let i = 0; i < a.length; i++) { const d = a[i] - b[i]; s += d * d; }
+  return Math.sqrt(s);
+}
+
+/**
+ * Pessoa cadastrada mais parecida com a assinatura `desc` (128 números). Cada pessoa tem 1+ assinaturas (`descs`);
+ * vale a menor distância. Acima de `limiar` = desconhecido (null). 0.55 é conservador pro FaceNet do face-api (padrão 0.6).
+ */
+export function maisProximo(desc, pessoas, limiar = 0.55) {
+  let melhor = null;
+  for (const p of pessoas) for (const d of (p.descs || [])) {
+    if (d.length !== desc.length) continue;
+    const dist = distanciaEuclidiana(desc, d);
+    if (dist <= limiar && (!melhor || dist < melhor.dist)) melhor = { pessoa: p, dist };
+  }
+  return melhor;
+}
+
+/** Nome vencedor das últimas `n` leituras (null = desconhecido): precisa de maioria (>= 3 iguais em 5). Evita piscar nome. */
+export function votarNome(votos, n = 5, minimo = 3) {
+  const rec = votos.slice(-n);
+  const cont = new Map();
+  for (const v of rec) if (v) cont.set(v, (cont.get(v) || 0) + 1);
+  let melhor = null;
+  for (const [nome, c] of cont) if (c >= minimo && (!melhor || c > melhor[1])) melhor = [nome, c];
+  return melhor ? melhor[0] : null;
+}
+
 // ------------------------------------------------------------------ ruído: grito / pico
 
 /**

@@ -210,6 +210,8 @@ h1 { margin: 0; font-size: 19px; letter-spacing: .22em; font-weight: 700; color:
 .check { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--txt) !important; cursor: pointer; }
 .checks { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
 .sub-check { margin-top: 8px; padding-left: 4px; }
+.sub-campo { margin-top: 10px; }
+.sub-campo label { margin-bottom: 4px; }
 .check input:disabled + * , .check:has(input:disabled) { opacity: .55; }
 .checks .check { margin-bottom: 0; }
 .campo label.sub { margin-top: 8px; }
@@ -262,6 +264,21 @@ select {
 .rel-item.alerta .rel-v { color: var(--alert); }
 .btn-limpar:disabled { opacity: .4; cursor: default; }
 
+/* identificação (reconhecimento facial com consentimento) */
+.painel h2 .status { font-size: 10px; letter-spacing: .08em; color: var(--dim); text-transform: none; }
+.consent { border: 1px solid rgba(255, 194, 62, .35); background: rgba(255, 194, 62, .06); border-radius: 6px; padding: 8px 10px; margin: 8px 0 10px; }
+.consent p { margin: 0 0 8px; font-size: 12px; line-height: 1.45; color: var(--txt); }
+.cadastro { display: grid; grid-template-columns: 1fr 1.2fr auto; gap: 6px; margin-bottom: 8px; }
+.cadastro input { background: var(--panel); color: var(--txt); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; font-family: var(--font-d); font-size: 13px; min-width: 0; }
+.cadastro select { padding: 6px 8px; font-size: 12px; }
+.btn-mini { background: rgba(62, 224, 255, .14); color: var(--cyan); border: 1px solid rgba(62, 224, 255, .4); border-radius: 6px; padding: 0 10px; font-family: var(--font-d); font-size: 12px; cursor: pointer; white-space: nowrap; }
+.btn-mini:disabled { opacity: .5; cursor: wait; }
+.pessoas { list-style: none; margin: 0; padding: 0; font-size: 12.5px; }
+.pessoas li { display: grid; grid-template-columns: 1fr auto auto auto; gap: 8px; align-items: center; padding: 6px 2px; border-bottom: 1px dashed var(--line); }
+.pessoas li.vazio { color: var(--dim); border: none; display: block; }
+.pessoas .p-nome { font-weight: 600; }
+.pessoas .p-meta { font-size: 10.5px; color: var(--dim); }
+
 /* mapa de calor da sessão */
 .heat-wrap { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
 .heat-cam { font-size: 10px; letter-spacing: .14em; text-transform: uppercase; color: var(--dim); margin-bottom: 5px; }
@@ -283,6 +300,49 @@ select {
 .log li { padding: 7px 2px; border-bottom: 1px dashed var(--line); line-height: 1.4; }
 .log li .hora { font-family: var(--font-m); color: var(--cyan); margin-right: 8px; font-size: 11px; }
 .log li.vazio { color: var(--dim); border: none; }
+
+/* histórico de sessões */
+.sessoes { list-style: none; margin: 0; padding: 0; font-size: 12px; }
+.sessoes li { display: grid; grid-template-columns: auto 1fr auto auto; gap: 8px; align-items: center; padding: 6px 2px; border-bottom: 1px dashed var(--line); }
+.sessoes li.vazio { display: block; color: var(--dim); border: none; }
+.sessoes .s-quando { color: var(--cyan); font-size: 11px; }
+.sessoes .s-meta { color: var(--dim); }
+
+/* modo telão */
+.btn-telao { right: 58px; width: auto; padding: 0 12px; font-family: var(--font-m); font-size: 11px; letter-spacing: .12em; }
+.telao { position: absolute; inset: 0; z-index: 6; background: var(--bg); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3vh; padding: 4vh 4vw; text-align: center; cursor: pointer; }
+.telao .t-topo { font-size: 2.2vh; letter-spacing: .3em; color: var(--dim); text-transform: uppercase; }
+.telao .t-nums { display: flex; gap: 6vw; flex-wrap: wrap; justify-content: center; }
+.telao .t-num b { display: block; font-family: var(--font-m); font-size: 16vh; line-height: 1; font-weight: 600; color: var(--txt); }
+.telao .t-num.ok b { color: var(--ok); } .telao .t-num.alerta b { color: var(--alert); } .telao .t-num.neutro b { color: var(--cyan); }
+.telao .t-num span { display: block; margin-top: 1vh; font-size: 2.2vh; letter-spacing: .3em; color: var(--dim); text-transform: uppercase; }
+.telao .t-nota { font-family: var(--font-m); font-size: 8vh; color: var(--cyan); }
+.telao .t-nota.ok { color: var(--ok); } .telao .t-nota.warn { color: var(--warn); } .telao .t-nota.alerta { color: var(--alert); }
+.telao .t-nota small { display: block; font-family: var(--font-d); font-size: 2.4vh; letter-spacing: .2em; color: var(--dim); text-transform: uppercase; margin-top: 1vh; }
+.telao .t-rodape { font-size: 2vh; color: var(--dim); }
+body.telao .feed-wrap { min-height: 70vh; }
+body.telao .feeds, body.telao .canto { visibility: hidden; }
+
+/* relatório imprimível (só aparece na impressão) */
+.print-rel { display: none; }
+@media print {
+  body > *:not(.print-rel) { display: none !important; }
+  body { background: #fff !important; color: #111; font-family: "Segoe UI", Arial, sans-serif; }
+  .print-rel { display: block; padding: 0; color: #111; }
+  .print-rel h1 { font-size: 20px; margin: 0 0 4px; letter-spacing: .04em; }
+  .print-rel h2 { font-size: 14px; margin: 16px 0 6px; }
+  .print-meta, .print-rodape { color: #555; font-size: 12px; }
+  .print-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 12px 0; }
+  .print-grid .rel-item { border: 1px solid #ccc; border-radius: 6px; padding: 8px; background: #fff; display: flex; flex-direction: column; }
+  .print-grid .rel-v { font-size: 18px; font-weight: 700; color: #111; } .print-grid .rel-k { font-size: 10px; letter-spacing: .1em; color: #666; text-transform: uppercase; }
+  .print-grid .rel-item.alerta .rel-v { color: #c0392b; } .print-grid .rel-item.warn .rel-v { color: #b9770e; } .print-grid .rel-item.ok .rel-v { color: #1e8449; }
+  .print-curva { width: 100%; height: 90px; border: 1px solid #ddd; border-radius: 6px; background: #0c141e; }
+  .print-heat .heat-cam { font-size: 10px; color: #555; margin: 10px 0 4px; text-transform: uppercase; letter-spacing: .1em; }
+  .print-heat .heat { display: grid; gap: 3px; } .print-heat .heat-f { font-size: 10px; color: #555; }
+  .print-heat .heat-c { height: 20px; border-radius: 3px; display: flex; align-items: center; justify-content: center; font-size: 10px; color: #fff; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .print-heat .heat-c.vazia { background: #eee; }
+  .print-rel ol { font-size: 12px; padding-left: 20px; } .print-rel .mono { font-family: Consolas, monospace; color: #555; margin-right: 6px; }
+}
 
 /* ---------- rodape ---------- */
 .rodape {

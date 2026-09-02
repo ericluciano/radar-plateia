@@ -4,7 +4,9 @@ import {
   valido, dedupe, geometria, mediana, formataDur, zonas, fileirasECadeiras, resumoSessao, csvRelatorio,
   analisarCores, regioesEpi, regioesEpiPorRosto, rostoDaPessoa, amostraEpi, estadoEpi, rotuloEpi, fraseEpi, casarPorIou,
   detectarPico, pontosDeQueda, alertaSala, acumularHeat, gradeHeatmap, postoDe, normalizarRect,
+  maisProximo, votarNome, resumoPresenca, compactarSessao, expandirHeat,
 } from "./engine.js";
+import { salvarSessao, listarSessoes, apagarSessao } from "./historico.js";
 
 const BUILD = "RADAR_V3_BUILD_20260902F";
 
@@ -74,10 +76,11 @@ const esc = (s) => String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt
 // ------------------------------------------------------------------ config persistente
 function carregarCfg() {
   const base = {
-    modo: "atencao", aviso: "voz", gap: 20, volume: 70, espelho: false, alcance: "longe", ruido: false, pico: true,
+    modo: "atencao", aviso: "voz", voz: "", gap: 20, volume: 70, espelho: false, alcance: "longe", ruido: false, pico: true,
     salaPct: 60, // alerta coletivo: taxa da sala abaixo disso por 30 s (0 = desligado)
     segundos: {}, cams: [{ deviceId: null, nome: "Câmera 1" }],
     postos: {}, // chave da câmera -> [{id, nome, box normalizado}]
+    facial: false, consent: false, // reconhecimento facial: só liga com os dois true
     epi: { colete: true, capacete: false, rigor: "normal" },
   };
   try {
@@ -118,16 +121,38 @@ function apitar() {
   } catch (e) { erros.push("apito: " + e.message); }
 }
 let vozPt = null;
+const vozesPt = () => ("speechSynthesis" in window ? speechSynthesis.getVoices() : []).filter(v => /^pt/i.test(v.lang));
+/**
+ * Escolha da voz (Eric, 02/09/2026: a voz online do Google no Chrome sai picotada). Ordem automática:
+ * Antonio (a mesma voz neural do avisar-voz — existe no Edge como "Microsoft Antonio Online (Natural)") > outra "Natural" >
+ * Microsoft LOCAL (Daniel/Maria, offline, sem cortes) > qualquer pt-BR > Google por último. `cfg.voz` = nome escolhido na UI.
+ */
 function acharVozPt() {
-  const vs = speechSynthesis.getVoices();
-  vozPt = vs.find(v => v.lang === "pt-BR" && /microsoft|google/i.test(v.name))
-       || vs.find(v => v.lang === "pt-BR") || vs.find(v => v.lang.startsWith("pt")) || null;
+  const vs = vozesPt();
+  const pref = cfg.voz && vs.find(v => v.name === cfg.voz);
+  vozPt = pref
+    || vs.find(v => /antonio/i.test(v.name))
+    || vs.find(v => /natural/i.test(v.name) && v.lang === "pt-BR")
+    || vs.find(v => /microsoft/i.test(v.name) && v.lang === "pt-BR")
+    || vs.find(v => v.lang === "pt-BR" && !/google/i.test(v.name))
+    || vs.find(v => v.lang === "pt-BR") || vs[0] || null;
+  renderVozes();
 }
-if ("speechSynthesis" in window) { acharVozPt(); speechSynthesis.onvoiceschanged = acharVozPt; }
+function renderVozes() {
+  const sel = $("sel-voz"); if (!sel) return;
+  const vs = vozesPt();
+  const limpo = (n) => n.replace(/Microsoft |Online |\(Natural\) |- Portuguese \(Brazil\)/g, "").trim();
+  const auto = vozPt ? " (" + esc(limpo(vozPt.name)) + ")" : "";
+  sel.innerHTML = `<option value="">automática${auto}</option>`
+    + vs.map(v => `<option value="${esc(v.name)}">${esc(v.name)}${v.localService ? "" : " · online"}</option>`).join("");
+  sel.value = cfg.voz && vs.some(v => v.name === cfg.voz) ? cfg.voz : "";
+}
+if ("speechSynthesis" in window) { speechSynthesis.onvoiceschanged = acharVozPt; }
 function falar(texto) {
   try {
+    if (!vozPt) acharVozPt();
     const u = new SpeechSynthesisUtterance(texto);
-    u.lang = "pt-BR"; u.rate = 1.05; u.volume = cfg.volume / 100;
+    u.lang = "pt-BR"; u.rate = 1.0; u.volume = cfg.volume / 100;
     if (vozPt) u.voice = vozPt;
     speechSynthesis.speak(u);
   } catch (e) { erros.push("voz: " + e.message); apitar(); }
@@ -318,6 +343,7 @@ function amostrarEpi(cam, dets, rostos = []) {
   };
   for (const d of dets) {
     const rosto = rostoDaPessoa(d.box, rostos);
+    d.rosto = rosto; // reaproveitado pelo reconhecimento facial
     const porRosto = rosto ? regioesEpiPorRosto(d.box, rosto) : null;
     d.regioes = porRosto || regioesEpi(d.box);
     d.ancora = porRosto ? "rosto" : "caixa";
@@ -325,6 +351,92 @@ function amostrarEpi(cam, dets, rostos = []) {
     if (porRosto && !porRosto.torsoVisivel) d.epi.colete = null;     // torso fora do quadro: sem leitura, não "sem colete"
     if (porRosto && !porRosto.cabecaVisivel) d.epi.capacete = null;
   }
+}
+
+// ------------------------------------------------------------------ reconhecimento facial (opt-in, consentimento, 100% local)
+// face-api (MIT, @vladmandic/face-api 1.7.15) carregado SOB DEMANDA: bundle 1,3 MB + modelos 6,5 MB só quando o cliente liga.
+const recon = { api: null, pronto: false, carregando: null, ocupado: false, pessoas: carregarPessoas(), erro: null };
+function carregarPessoas() {
+  try { const p = JSON.parse(localStorage.getItem("radar.pessoas.v1") || "[]"); return Array.isArray(p) ? p : []; } catch { return []; }
+}
+function salvarPessoas() { try { localStorage.setItem("radar.pessoas.v1", JSON.stringify(recon.pessoas)); } catch { /* modo anônimo */ } renderPessoas(); }
+const facialLigado = () => cfg.facial && cfg.consent;
+function garantirFaceApi() {
+  if (recon.pronto) return Promise.resolve(true);
+  if (recon.carregando) return recon.carregando;
+  $("facial-status").textContent = "carregando modelo…";
+  recon.carregando = (async () => {
+    const api = await import("./vendor/face-api/face-api.esm.js");
+    // o bundle registra o backend wasm como prioridade mas não o inicializa (precisaria baixar .wasm): força webgl, senão cpu
+    try { await api.tf.setBackend("webgl"); await api.tf.ready(); } catch { await api.tf.setBackend("cpu"); await api.tf.ready(); }
+    if (!["webgl", "cpu"].includes(api.tf.getBackend())) { await api.tf.setBackend("cpu"); await api.tf.ready(); }
+    await api.nets.faceLandmark68TinyNet.loadFromUri("vendor/face-api/model");
+    await api.nets.faceRecognitionNet.loadFromUri("vendor/face-api/model");
+    recon.api = api; recon.pronto = true;
+    registrarLog(`reconhecimento facial pronto (motor ${api.tf?.getBackend?.() || "?"}, ${recon.pessoas.length} cadastrado(s))`);
+    renderPessoas();
+    return true;
+  })().catch(e => { recon.erro = e.message; erros.push("face-api: " + e.message); registrarLog("falha no reconhecimento facial: " + e.message); renderPessoas(); return false; })
+    .finally(() => { recon.carregando = null; });
+  return recon.carregando;
+}
+/** Assinatura (128 números) do rosto dentro de `box` no vídeo da câmera: recorte com margem, alinhamento por marcos, FaceNet. */
+async function assinaturaDoRosto(cam, box) {
+  const [x, y, w, h] = box, m = 0.35;
+  const W = cam.video.videoWidth, H = cam.video.videoHeight;
+  const sx = Math.max(0, x - w * m), sy = Math.max(0, y - h * m);
+  const sw = Math.min(W - sx, w * (1 + 2 * m)), sh = Math.min(H - sy, h * (1 + 2 * m));
+  const c = document.createElement("canvas"); c.width = 224; c.height = Math.max(32, Math.round(224 * sh / sw));
+  c.getContext("2d").drawImage(cam.video, sx, sy, sw, sh, 0, 0, c.width, c.height);
+  let alvo = c;
+  try {
+    const lm = await recon.api.detectFaceLandmarksTiny(c);
+    if (lm) { const faces = await recon.api.extractFaces(c, [lm.align()]); if (faces[0]) alvo = faces[0]; }
+  } catch (e) { erros.push("marcos faciais: " + e.message); }
+  return Array.from(await recon.api.computeFaceDescriptor(alvo));
+}
+const rostoDoTrack = (tr) => MODOS[modo].pessoas ? tr.rostoBox : tr.box;
+/** Uma leitura por volta, no máximo; cada pessoa relida a cada ~2,5 s; nome só fixa com maioria (votarNome). */
+function reconhecer(cam, agora) {
+  if (!facialLigado() || !recon.pronto || recon.ocupado || !recon.pessoas.length) return;
+  const tr = cam.tracks.find(t => valido(t) && !t.ghost && rostoDoTrack(t) && rostoDoTrack(t)[2] >= 50 && agora - (t.reconEm ?? -Infinity) >= 2.5);
+  if (!tr) return;
+  tr.reconEm = agora; recon.ocupado = true;
+  assinaturaDoRosto(cam, rostoDoTrack(tr)).then(desc => {
+    const r = maisProximo(desc, recon.pessoas);
+    tr.votos = [...(tr.votos || []), r ? r.pessoa.nome : null].slice(-5);
+    const antes = tr.pessoa; tr.pessoa = votarNome(tr.votos);
+    if (tr.pessoa && tr.pessoa !== antes) registrarLog(`${cams.length > 1 ? cam.nome + ": " : ""}${tr.pessoa} reconhecido(a)`);
+  }).catch(e => erros.push("reconhecer: " + e.message)).finally(() => { recon.ocupado = false; });
+}
+async function cadastrarRosto(idx, nome, pessoaId = null) {
+  const cam = cams[idx]; nome = (nome || "").trim();
+  if (!cam || !cam.rodando) return { ok: false, motivo: "câmera não está ligada" };
+  if (!facialLigado()) return { ok: false, motivo: "ligue o reconhecimento e confirme o consentimento" };
+  if (!(await garantirFaceApi())) return { ok: false, motivo: "modelo não carregou: " + recon.erro };
+  const agora = agoraS(); // só rostos estáveis (>= 1,5 s na tela): detecção espúria de 1 quadro não conta como "outra pessoa"
+  const rostos = cam.tracks.filter(t => valido(t) && !t.ghost && rostoDoTrack(t) && agora - t.inicio >= 1.5);
+  if (rostos.length !== 1) return { ok: false, motivo: rostos.length ? `há ${rostos.length} rostos na câmera — precisa estar sozinho` : "nenhum rosto estável na câmera (espere 2 s de frente pra ela)" };
+  if (!pessoaId && !nome) return { ok: false, motivo: "dê um nome" };
+  const desc = await assinaturaDoRosto(cam, rostoDoTrack(rostos[0]));
+  let p = pessoaId ? recon.pessoas.find(x => x.id === pessoaId) : recon.pessoas.find(x => x.nome.toLowerCase() === nome.toLowerCase());
+  if (!p) { p = { id: Math.random().toString(36).slice(2, 8), nome, descs: [], consentEm: Date.now() }; recon.pessoas.push(p); }
+  p.descs.push(desc); if (p.descs.length > 6) p.descs.shift();
+  salvarPessoas();
+  registrarLog(`rosto cadastrado: ${p.nome} (${p.descs.length} amostra${p.descs.length > 1 ? "s" : ""})`);
+  return { ok: true, pessoa: p.nome, amostras: p.descs.length };
+}
+function renderPessoas() {
+  const ul = $("lista-pessoas");
+  const st = $("facial-status");
+  st.textContent = !facialLigado() ? "" : recon.pronto ? `pronto · ${recon.pessoas.length} cadastrado(s)` : recon.erro ? "falhou" : recon.carregando ? "carregando modelo…" : "";
+  ul.innerHTML = recon.pessoas.length ? recon.pessoas.map(p => `
+    <li><span class="p-nome">${esc(p.nome)}</span><span class="p-meta mono">${p.descs.length} amostra${p.descs.length > 1 ? "s" : ""} · ${new Date(p.consentEm).toLocaleDateString("pt-BR")}</span>
+      <button class="btn-limpar" data-acao="amostra" data-id="${p.id}" title="Adicionar mais uma amostra do rosto (outro ângulo/luz)">+ amostra</button>
+      <button class="btn-limpar" data-acao="apagar" data-id="${p.id}">apagar</button></li>`).join("")
+    : `<li class="vazio">ninguém cadastrado</li>`;
+  const sel = $("sel-cad-cam");
+  sel.innerHTML = cams.map((c, i) => `<option value="${i}">${esc(c.nome)}</option>`).join("");
 }
 
 // ------------------------------------------------------------------ tracker (por câmera)
@@ -402,31 +514,32 @@ function atualizarTracks(cam, dets, agora) {
 function atualizarTracksPessoas(cam, dets, agora) {
   const { pares, livres } = casarPorIou(cam.tracks, dets, 0.2);
   for (const [tr, d] of pares) {
-    tr.box = d.box; tr.visto = agora; tr.regioes = d.regioes; tr.ancora = d.ancora;
+    tr.box = d.box; tr.visto = agora; tr.regioes = d.regioes; tr.ancora = d.ancora; tr.rostoBox = d.rosto || tr.rostoBox;
     tr.score = 0.8 * tr.score + 0.2 * d.score;
     tr.hist.push(d.epi); if (tr.hist.length > 8) tr.hist.shift();
   }
   for (const d of livres) {
     cam.tracks.push({
       id: cam.proximoId++, box: d.box, kps: [], score: d.score, inicio: agora, visto: agora,
-      hist: [d.epi], regioes: d.regioes, ancora: d.ancora, faltando: [], semEpiDesde: null, avisado: false,
+      hist: [d.epi], regioes: d.regioes, ancora: d.ancora, rostoBox: d.rosto || null, faltando: [], semEpiDesde: null, avisado: false,
       ghost: false, sumido: 0, focoS: 0, totalS: 0, semEpiS: 0, ultimoTick: agora,
     });
   }
   cam.tracks = cam.tracks.filter(tr => agora - tr.visto <= 2.0); // folga pro rodízio de câmeras
 }
 function posicaoNaSala(cam, alvo) { return fileirasECadeiras(cam.tracks).get(alvo) || null; }
-/** Nome curto da pessoa/lugar: posto mapeado (se houver) > fileira/cadeira estimada > #id. */
+/** Nome curto da pessoa/lugar: pessoa reconhecida > posto mapeado > fileira/cadeira estimada > #id. */
 function nomeCurto(cam, tr) {
+  if (tr.pessoa) return tr.pessoa;
   const p = cam.postoDe(tr);
   if (p) return p.nome;
   const pos = posicaoNaSala(cam, tr);
   return pos ? (modo === "seguranca" ? `P${pos[1]}` : `F${pos[0]}·C${pos[1]}`) : `#${tr.id}`;
 }
 function ondeFica(cam, tr) {
-  const p = cam.postoDe(tr);
-  const pos = p ? null : posicaoNaSala(cam, tr);
-  const lugar = p ? p.nome : !pos ? "Alguém"
+  const p = tr.pessoa ? null : cam.postoDe(tr);
+  const pos = tr.pessoa || p ? null : posicaoNaSala(cam, tr);
+  const lugar = tr.pessoa ? tr.pessoa : p ? p.nome : !pos ? "Alguém"
     : modo === "seguranca" ? `Posição ${pos[1]} da esquerda${pos[0] > 1 ? `, fila ${pos[0]}` : ""}`
     : `Fileira ${pos[0]}, cadeira ${pos[1]} contando da sua esquerda`;
   return cams.length > 1 ? `${cam.nome}: ${lugar}` : lugar;
@@ -542,7 +655,8 @@ function desenhar(cam) {
     ctx.strokeStyle = cor;
     ctx.setLineDash(suspeito ? [6, 6] : []);
     ctx.strokeRect(x, y, w, h);
-    if (tr.rotulo && !suspeito) { ctx.fillStyle = cor; ctx.fillText(tr.rotulo, x, Math.max(16, y - 6)); }
+    const etiqueta = [tr.pessoa, tr.rotulo].filter(Boolean).join(" · ");
+    if (etiqueta && !suspeito) { ctx.fillStyle = cor; ctx.fillText(etiqueta, x, Math.max(16, y - 6)); }
     if (modo === "seguranca" && tr.regioes && tr.faltando?.length) { // mostra ONDE procurou o EPI que falta
       ctx.setLineDash([4, 4]); ctx.globalAlpha = 0.7;
       for (const item of tr.faltando) { const [rx, ry, rw, rh] = tr.regioes[item]; ctx.strokeRect(rx, ry, rw, rh); }
@@ -707,6 +821,7 @@ class Cam {
       atualizarTracks(this, dets, agora);
       r = avaliar(this, agora);
     }
+    reconhecer(this, agora);
     desenhar(this);
     const inst = 1000 / Math.max(performance.now() - t0, 1);
     this.fps = this.fps ? 0.9 * this.fps + 0.1 * inst : inst;
@@ -837,8 +952,11 @@ function renderRelatorio(agora) {
     ["Pessoas (pico)", r.pico],
   ];
   const quedas = m.taxa ? pontosDeQueda(sessao.amostras) : [];
+  const pr = resumoPresenca(sessao.amostras);
   if (m.taxa) itens.push([m.taxa, pct], ["Nota", r.nota.rotulo, r.nota.cor]);
   else itens.push(["Média de pessoas", r.mediaPessoas.toFixed(1)]);
+  if (pr.picoT != null) itens.push(["Pico às", horaDe(pr.picoT)]);
+  if (modo === "presenca") itens.push(["Entradas", pr.entradas], ["Saídas", pr.saidas]);
   if (m.usaAlerta) itens.push(["Minutos com alerta", r.minutosComAlerta.toFixed(1)], ["Avisos emitidos", r.avisos]);
   if (m.taxa) itens.push(["Quedas de atenção", quedas.length, quedas.length ? "warn" : ""]);
   if (r.ruidoMedio != null) itens.push(["Ruído médio", Math.round(r.ruidoMedio)], ["Gritos / picos", sessao.picos, sessao.picos ? "warn" : ""]);
@@ -848,7 +966,54 @@ function renderRelatorio(agora) {
   desenharCurva($("curva"), m.taxa ? serie : sessao.amostras.map(a => a.pessoas), m.taxa ? 100 : Math.max(r.pico, 1), "#34e08c", quedas.map(q => q.i));
   $("curva-legenda").hidden = !quedas.length;
   renderHeatmap();
-  $("btn-csv").disabled = !sessao.amostras.length;
+  $("btn-csv").disabled = !sessao.amostras.length; $("btn-print").disabled = !sessao.amostras.length;
+}
+// ------------------------------------------------------------------ histórico de sessões (IndexedDB) e relatório imprimível
+let sessaoAntigaFim = null; // quando uma sessão do histórico está aberta no painel, o "agora" do relatório é o fim dela
+async function guardarSessao() {
+  if (sessao.amostras.length < 2) return;
+  try { await salvarSessao(compactarSessao(sessao, modo, cams)); await renderHistorico(); }
+  catch (e) { erros.push("histórico: " + e.message); registrarLog("não consegui guardar a sessão no histórico: " + e.message); }
+}
+async function renderHistorico() {
+  const ul = $("lista-sessoes");
+  try {
+    const regs = await listarSessoes();
+    ul.innerHTML = regs.length ? regs.slice(0, 30).map(reg => {
+      const r = resumoSessao({ inicio: reg.inicio, passoS: reg.passoS, amostras: reg.amostras, avisos: reg.avisos }, reg.fimT);
+      const d = new Date(reg.inicioWall);
+      return `<li data-id="${reg.id}"><span class="s-quando mono">${d.toLocaleDateString("pt-BR")} ${d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}</span>
+        <span class="s-meta">${esc(MODOS[reg.modo]?.nome || reg.modo)} · ${formataDur(r.duracaoS)} · pico ${r.pico}${MODOS[reg.modo]?.taxa ? ` · ${r.nota.rotulo}` : ""}</span>
+        <button class="btn-limpar" data-acao="abrir">abrir</button><button class="btn-limpar" data-acao="apagar">apagar</button></li>`;
+    }).join("") : `<li class="vazio">nenhuma sessão guardada ainda (aparece ao parar as câmeras)</li>`;
+  } catch (e) { ul.innerHTML = `<li class="vazio">histórico indisponível neste navegador (${esc(e.message)})</li>`; }
+}
+async function abrirSessaoAntiga(id) {
+  if (rodando) { registrarLog("pare as câmeras antes de abrir uma sessão antiga"); return false; }
+  const reg = (await listarSessoes()).find(r => r.id === id); if (!reg) return false;
+  if (reg.modo in MODOS) { modo = reg.modo; }
+  sessao = { inicio: reg.inicio, inicioWall: reg.inicioWall, passoS: reg.passoS, amostras: reg.amostras, avisos: reg.avisos, picos: reg.picos || 0 };
+  cams.forEach((c, i) => c.heat = expandirHeat(reg.heat?.[i]?.celulas));
+  sessaoAntigaFim = reg.fimT;
+  aplicarUi();
+  registrarLog(`sessão de ${new Date(reg.inicioWall).toLocaleString("pt-BR")} aberta no painel (relatório, CSV e impressão)`);
+  return true;
+}
+function imprimirRelatorio() {
+  const m = MODOS[modo];
+  const d = new Date(sessao.inicioWall);
+  const el = $("print-rel");
+  const curva = $("curva");
+  el.innerHTML = `
+    <h1>Radar da Plateia — relatório da sessão</h1>
+    <p class="print-meta">Modo ${esc(m.nome)} · ${d.toLocaleDateString("pt-BR")} às ${d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })} · ${cams.map(c => esc(c.nome)).join(", ")}</p>
+    <div class="print-grid">${$("rel-grid").innerHTML}</div>
+    ${curva?.width ? `<img class="print-curva" src="${curva.toDataURL("image/png")}" alt="curva da sessão">` : ""}
+    ${$("heat").innerHTML ? `<div class="print-heat">${$("heat").innerHTML}</div>` : ""}
+    <h2>Avisos (${sessao.avisos.length})</h2>
+    <ol>${sessao.avisos.map(v => `<li><span class="mono">${horaDe(v.t)}</span> ${esc(v.texto)}</li>`).join("") || "<li>nenhum</li>"}</ol>
+    <p class="print-rodape">Gerado pelo Radar da Plateia · Expert Integrado · processamento 100% local, nenhuma imagem é guardada.</p>`;
+  window.print();
 }
 // alerta coletivo: a sala inteira caiu (não é sobre uma pessoa) — 1 aviso por episódio
 let salaAvisada = false;
@@ -887,7 +1052,7 @@ function loop() {
     const bons = ativas.reduce((s, c) => s + c.bons, 0), ruins = ativas.reduce((s, c) => s + c.ruins, 0);
     medirRuido(agora);
     renderContadores(bons, ruins);
-    renderStats();
+    renderStats(); renderTelao();
     amostrarSessao(agora, bons, ruins);
     if (agora - ultimoRender >= 2) { ultimoRender = agora; renderRelatorio(agora); avaliarSala(agora); }
     if (modo === "presenca" && (!amostrasPresenca.length || agora - amostrasPresenca[amostrasPresenca.length - 1][0] >= 2)) {
@@ -921,11 +1086,11 @@ async function ligarTudo() {
     for (const cam of cams) if (await cam.ligar()) ok++;
     await listarCameras();
     if (ok) {
-      $("feed-vazio").hidden = true; $("btn-fs").hidden = false; $("btn-parar").hidden = false;
+      $("feed-vazio").hidden = true; $("btn-fs").hidden = false; $("btn-telao").hidden = false; $("btn-parar").hidden = false;
       setPill("pill-camera", "on");
       $("pill-camera").lastChild.textContent = ok > 1 ? `${ok} CÂMERAS` : `CÂMERA ${cams[0].res}`;
       rodando = true; custoTick = []; amostrasPresenca = []; picoPresenca = 0;
-      sessao = novaSessao(); ultimoRender = 0; salaAvisada = false; cams.forEach(c => c.heat = new Map());
+      sessao = novaSessao(); ultimoRender = 0; salaAvisada = false; sessaoAntigaFim = null; cams.forEach(c => c.heat = new Map());
       if (cfg.ruido) await ligarRuido();
       loop();
       if (cfg.aviso === "voz") falar(`Radar ativo. Modo ${MODOS[modo].nome}${ok > 1 ? `, ${ok} câmeras` : ""}.`);
@@ -944,10 +1109,12 @@ function pararTudo() {
   rodando = false;
   cams.forEach(c => c.parar());
   desligarRuido();
+  sairDoTelao();
   renderRelatorio(agoraS());
+  guardarSessao();
   $("feed-vazio").hidden = false;
   $("feed-msg").innerHTML = "Câmeras paradas. O relatório da sessão está no painel ao lado. Clique em <strong>Ligar câmeras</strong> pra começar outra.";
-  $("btn-parar").hidden = true; $("btn-fs").hidden = true;
+  $("btn-parar").hidden = true; $("btn-fs").hidden = true; $("btn-telao").hidden = true;
   setPill("pill-camera", "off");
   $("pill-camera").lastChild.textContent = "CÂMERA";
 }
@@ -970,13 +1137,16 @@ function aplicarUi() {
   $("chk-espelho").checked = cfg.espelho;
   $("chk-ruido").checked = cfg.ruido;
   $("chk-pico").checked = cfg.pico; $("chk-pico").disabled = !cfg.ruido;
+  $("chk-facial").checked = cfg.facial; $("chk-consent").checked = cfg.consent; $("facial-corpo").hidden = !cfg.facial;
+  renderPessoas();
   $("feeds").classList.toggle("espelhado", cfg.espelho);
   document.querySelectorAll("#seg-aviso button").forEach(b => b.classList.toggle("ativo", b.dataset.v === cfg.aviso));
+  $("campo-voz").hidden = cfg.aviso !== "voz"; renderVozes();
   document.querySelectorAll("#seg-alcance button").forEach(b => b.classList.toggle("ativo", b.dataset.v === cfg.alcance));
   $("campo-epi").hidden = modo !== "seguranca";
   $("chk-epi-colete").checked = !!cfg.epi.colete; $("chk-epi-capacete").checked = !!cfg.epi.capacete;
   document.querySelectorAll("#seg-rigor button").forEach(b => b.classList.toggle("ativo", b.dataset.v === cfg.epi.rigor));
-  renderContadores(0, 0); renderStats(); renderRelatorio(agoraS());
+  renderContadores(0, 0); renderStats(); renderRelatorio(sessaoAntigaFim ?? agoraS());
 }
 function entrarNoModo(m) {
   modo = m; reiniciarTracking(); salvarCfg(); aplicarUi();
@@ -1005,6 +1175,10 @@ $("seg-aviso").addEventListener("click", (ev) => {
   if (cfg.aviso === "apito") apitar();
   if (cfg.aviso === "voz") falar("Avisos por voz.");
 });
+$("sel-voz").addEventListener("change", () => {
+  cfg.voz = $("sel-voz").value; salvarCfg(); acharVozPt();
+  falar("Esta é a voz dos avisos.");
+});
 $("seg-alcance").addEventListener("click", (ev) => {
   const b = ev.target.closest("button"); if (!b) return;
   cfg.alcance = b.dataset.v; cams.forEach(c => c.tileCursor = 0); custoTick = []; salvarCfg(); aplicarUi();
@@ -1019,11 +1193,59 @@ $("chk-ruido").addEventListener("change", async () => {
   if (!cfg.ruido) desligarRuido();
 });
 $("chk-pico").addEventListener("change", () => { cfg.pico = $("chk-pico").checked; salvarCfg(); });
+function aplicarFacial() {
+  salvarCfg(); aplicarUi();
+  if (facialLigado()) garantirFaceApi();
+  else cams.forEach(c => c.tracks.forEach(t => { t.pessoa = null; t.votos = []; }));
+}
+$("chk-facial").addEventListener("change", () => { cfg.facial = $("chk-facial").checked; aplicarFacial(); });
+$("chk-consent").addEventListener("change", () => { cfg.consent = $("chk-consent").checked; aplicarFacial(); if (cfg.facial && !cfg.consent) registrarLog("reconhecimento facial desligado: sem consentimento confirmado"); });
+$("btn-cadastrar").addEventListener("click", async () => {
+  const b = $("btn-cadastrar"); b.disabled = true;
+  const r = await cadastrarRosto(Number($("sel-cad-cam").value), $("inp-cad-nome").value);
+  b.disabled = false;
+  if (r.ok) $("inp-cad-nome").value = ""; else registrarLog("cadastro de rosto: " + r.motivo);
+});
+$("lista-pessoas").addEventListener("click", async (ev) => {
+  const b = ev.target.closest("button[data-acao]"); if (!b) return;
+  const p = recon.pessoas.find(x => x.id === b.dataset.id); if (!p) return;
+  if (b.dataset.acao === "apagar") { if (confirm(`Apagar o cadastro de ${p.nome}? (imediato, sem volta)`)) { recon.pessoas = recon.pessoas.filter(x => x !== p); salvarPessoas(); registrarLog(`cadastro apagado: ${p.nome}`); } }
+  else { const r = await cadastrarRosto(Number($("sel-cad-cam").value), p.nome, p.id); if (!r.ok) registrarLog("amostra: " + r.motivo); }
+});
 $("btn-ligar").addEventListener("click", ligarTudo);
 $("btn-parar").addEventListener("click", pararTudo);
 $("btn-add-cam").addEventListener("click", () => adicionarCam({ nome: `Câmera ${cams.length + 1}` }));
 $("btn-csv").addEventListener("click", baixarCsv);
 $("btn-fs").addEventListener("click", () => { document.fullscreenElement ? document.exitFullscreen() : feedWrap.requestFullscreen(); });
+// ------------------------------------------------------------------ modo telão: só números, sem mostrar a câmera (pra projetar)
+function renderTelao() {
+  if (!document.body.classList.contains("telao")) return;
+  const m = MODOS[modo];
+  const r = resumoSessao(sessao, agoraS());
+  const nums = [...document.querySelectorAll("#contadores .contador")].map(c => `<div class="t-num ${c.className.replace("contador", "").trim()}"><b>${c.querySelector(".num").textContent}</b><span>${c.querySelector(".rot").textContent}</span></div>`).join("");
+  $("telao").innerHTML = `<div class="t-topo">Modo ${esc(m.nome)} · ${new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}</div>
+    <div class="t-nums">${nums}</div>
+    ${m.taxa ? `<div class="t-nota ${r.nota.cor}">${r.taxa == null ? "—" : Math.round(r.taxa * 100) + "%"} <small>${esc(m.taxa)} · nota ${esc(r.nota.rotulo)}</small></div>` : ""}
+    <div class="t-rodape">${formataDur(r.duracaoS)} de sessão · ${totalPessoas()} pessoa${totalPessoas() === 1 ? "" : "s"} agora</div>`;
+}
+function entrarNoTelao() {
+  document.body.classList.add("telao"); $("telao").hidden = false; renderTelao();
+  if (!document.fullscreenElement) feedWrap.requestFullscreen?.().catch(() => {});
+}
+function sairDoTelao() {
+  document.body.classList.remove("telao"); $("telao").hidden = true;
+  if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
+}
+$("btn-telao").addEventListener("click", () => document.body.classList.contains("telao") ? sairDoTelao() : entrarNoTelao());
+$("telao").addEventListener("dblclick", sairDoTelao);
+document.addEventListener("fullscreenchange", () => { if (!document.fullscreenElement && document.body.classList.contains("telao")) sairDoTelao(); });
+$("btn-print").addEventListener("click", imprimirRelatorio);
+$("lista-sessoes").addEventListener("click", async (ev) => {
+  const b = ev.target.closest("button[data-acao]"); if (!b) return;
+  const id = Number(b.closest("li").dataset.id);
+  if (b.dataset.acao === "abrir") await abrirSessaoAntiga(id);
+  else if (confirm("Apagar esta sessão do histórico?")) { await apagarSessao(id); await renderHistorico(); }
+});
 $("btn-limpar").addEventListener("click", () => { $("log").innerHTML = `<li class="vazio">nenhum aviso ainda</li>`; });
 
 // debug / teste automatizado
@@ -1034,9 +1256,10 @@ window.__radar = {
       sessao: { amostras: sessao.amostras.length, avisos: sessao.avisos.length, ultimoAviso: sessao.avisos[sessao.avisos.length - 1]?.texto ?? null },
       ruido: ruido.ativo ? ruido.nivel : null,
       epi: { ...cfg.epi, segundos: segundosDoModo() },
+      facial: { ligado: facialLigado(), pronto: recon.pronto, erro: recon.erro, pessoas: recon.pessoas.map(p => ({ nome: p.nome, amostras: p.descs.length })) },
       cams: cams.map(c => ({ nome: c.nome, rodando: c.rodando, res: c.res, lastFaces: c.lastFaces,
                              tracks: c.tracks.length, validos: c.tracks.filter(valido).length,
-                             pessoas: c.tracks.map(t => ({ id: t.id, estado: t.estado ?? null, faltando: t.faltando ?? null, hist: t.hist?.length ?? 0, ancora: t.ancora ?? null })),
+                             pessoas: c.tracks.map(t => ({ id: t.id, estado: t.estado ?? null, faltando: t.faltando ?? null, hist: t.hist?.length ?? 0, ancora: t.ancora ?? null, pessoa: t.pessoa ?? null, votos: t.votos ?? [] })),
                              bons: c.bons, ruins: c.ruins, fps: Number(c.fps.toFixed(1)), erro: c.erro,
                              videoT: Number(c.video.currentTime.toFixed(1)), videoRs: c.video.readyState,
                              trackState: c.stream?.getVideoTracks()[0]?.readyState ?? null })),
@@ -1050,6 +1273,14 @@ window.__radar = {
   setSegundos: (n) => { cfg.segundos[modo] = Number(n); aplicarUi(); },
   setEpi: (o) => { Object.assign(cfg.epi, o); salvarCfg(); aplicarUi(); },
   setPostos: (i, postos) => { const c = cams[i]; if (!c) return false; c.postos = postos; c.salvarPostos(); return true; },
+  setFacial: (on) => { cfg.facial = !!on; cfg.consent = !!on; aplicarFacial(); return facialLigado(); },
+  cadastrarRosto: (i, nome) => cadastrarRosto(i, nome),
+  pessoas: () => recon.pessoas.map(p => p.nome),
+  apagarPessoas: () => { recon.pessoas = []; salvarPessoas(); },
+  historico: () => listarSessoes().then(rs => rs.map(r => ({ id: r.id, modo: r.modo, amostras: r.amostras.length, avisos: r.avisos.length }))),
+  abrirSessao: (id) => abrirSessaoAntiga(id),
+  telao: (on) => { on ? entrarNoTelao() : sairDoTelao(); return document.body.classList.contains("telao"); },
+  relatorioHtml: () => $("rel-grid").innerText,
   getPostos: (i) => cams[i]?.postos ?? null,
   nomes: (i) => (cams[i]?.tracks ?? []).map(t => nomeCurto(cams[i], t)),
 };
@@ -1057,4 +1288,6 @@ window.__radar = {
 // boot
 $("build").textContent = BUILD;
 cfg.cams.forEach(spec => adicionarCam(spec));
+if ("speechSynthesis" in window) acharVozPt();
 aplicarUi();
+renderHistorico();

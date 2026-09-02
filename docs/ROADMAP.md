@@ -9,6 +9,7 @@ App de navegador (radar.ericluciano.com.br) que analisa a câmera 100% na máqui
 - v1 (01/09) app desktop Python com apito; v2 aviso por voz com fileira/cadeira; v3 app web publicado com 5 modos (Atenção, Exercício, Produtividade, Postura, Presença), aviso configurável, segundos por modo.
 - v3.1 alcance Perto/Médio/Longe (varredura por zonas); v3.2 resolução real da câmera; v3.3 multi-câmera (células nomeadas, contadores somados, aviso com nome da câmera, rodízio de processamento, filtro de rosto suspeito).
 - v3.4: motor separado (`engine.js`) com testes unitários, testes e2e no repositório, relatório de sessão com nota e exportação CSV, medidor de ruído da sala.
+- v3.7 (02/09, loop autônomo): **reconhecimento facial com consentimento** (opt-in por cliente: caixa de consentimento LGPD obrigatória, cadastro de rosto pela própria câmera com nome, 1+ amostras por pessoa, tudo em assinatura numérica no navegador, apagar imediato; o nome entra nos avisos, etiquetas e estatísticas; motor face-api MIT embarcado, 8 MB carregados só quando ligado); **escolha da voz** (lista de vozes do sistema; automática prefere Antonio/Natural > Microsoft local > Google, porque a voz online do Google picotava); **presença automática** (entradas, saídas e horário do pico no relatório); **modo telão** (só números e nota, sem câmera, tela cheia); **relatório imprimível / PDF** (botão imprimir com curva, mapa de calor e avisos); **histórico de sessões** no navegador (IndexedDB) com abrir/CSV/imprimir/apagar.
 - v3.6 (02/09, loop autônomo pedido pelo Eric): **grito/pico de ruído** vira aviso (nível bruto salta 30+ sobre o fundo dos 2 s anteriores e passa de 80; barulho constante não dispara); **curva com pontos de queda** (bolinha vermelha onde a taxa caiu 20+ pontos) e contador "Quedas de atenção"; **alerta da sala inteira** (taxa abaixo de X% por 30 s, com 2+ pessoas; X ajustável, 0 desliga); **mapa de calor por fileira/cadeira** no relatório (% do tempo disperso/sem EPI por lugar, por câmera); **postos/assentos por câmera**: botão "postos" na célula, arrasta um retângulo sobre cada lugar e dá nome — o nome entra nos avisos ("Mesa da Ana: cabeça baixa há…"), nas estatísticas por pessoa e fica salvo no navegador por câmera.
 - v3.5 (02/09): **modo Segurança (EPI)** — detector de pessoas (corpo) embarcado, leitura de colete alta-visibilidade e capacete por cor, EPI obrigatório configurável (colete/capacete) e rigor, aviso "posição X sem colete há mais de N segundos", contadores com/sem EPI, conformidade por pessoa e no relatório. Absorveu e encerrou o app separado Monitor de EPI. Correção de bug: o primeiro aviso ficava mudo nos 20 s iniciais da página (valia pra todos os modos).
 
@@ -20,10 +21,10 @@ App de navegador (radar.ericluciano.com.br) que analisa a câmera 100% na máqui
 ## Próximos passos SEM decisão pendente (ordem sugerida)
 1. ~~Curva de atenção com pontos de queda + alerta da sala~~ — entregue na v3.6.
 2. ~~Mapa de calor por fileira/cadeira~~ — entregue na v3.6.
-3. Relatório em PDF/HTML imprimível além do CSV; histórico de sessões no navegador (IndexedDB) pra reabrir depois.
-4. Presença automática: contagem ao entrar/sair + hora do pico, exportável.
-5. Sons de aviso alternativos e aviso por voz em outros idiomas (Web Speech já suporta).
-6. Modo tela cheia "telão" só com contadores e nota (pra projetar sem mostrar a câmera).
+3. ~~Relatório imprimível/PDF + histórico de sessões (IndexedDB)~~ — entregue na v3.7.
+4. ~~Presença automática (entradas/saídas + hora do pico)~~ — entregue na v3.7.
+5. ~~Escolha da voz~~ — entregue na v3.7. Falta: sons de apito alternativos e voz em outros idiomas (baixa prioridade).
+6. ~~Modo telão~~ — entregue na v3.7.
 
 ## Decisões tomadas pelo Eric (02/09/2026)
 1. **Identificar quem é quem — OS DOIS.** Primeiro por **posto/assento** (cliente mapeia "posto 3 = João"; sem biometria). Depois **reconhecimento facial com foto cadastrada** onde o cliente assinar consentimento (biometria = dado sensível, LGPD art. 11) — embeddings faciais comparados localmente no navegador, foto nunca sai da máquina do cliente.
@@ -36,7 +37,7 @@ App de navegador (radar.ericluciano.com.br) que analisa a câmera 100% na máqui
 1. ~~Modo Segurança (EPI) v1~~ — entregue na v3.5 (leitura por cor).
 2. ~~Identificação por posto/assento~~ — entregue na v3.6 (mapa por câmera, nome nos avisos e estatísticas).
 3. ~~Alerta por grito/pico de ruído + heatmap por fileira + curva com pontos de queda~~ — entregue na v3.6.
-4. Reconhecimento facial com consentimento (cadastro de foto local, embeddings, LGPD por cliente).
+4. ~~Reconhecimento facial com consentimento~~ — entregue na v3.7 (face-api MIT; cadastro pela câmera; consentimento obrigatório; assinatura numérica local; apagar imediato). Limite: rosto precisa de ~50 px de largura; 2+ amostras por pessoa acertam mais; limiar conservador (0,55) prefere "desconhecido" a confundir pessoas.
 5. Publicar o repositório (repo-vitrine + MIT).
 6. Modo Segurança v2 — modelo TREINADO de EPI (capacete, colete, luva, óculos por detecção, não por cor), quando a leitura por cor não bastar num cliente real. Caminho compatível com o repo MIT: dataset público CC-BY (ex.: Construction Site Safety, Roboflow/Kaggle) + MediaPipe Model Maker (Apache 2.0) gerando `.tflite` pro mesmo `ObjectDetector` já embarcado. Pesos YOLO prontos (Ultralytics, keremberke) são AGPL e não entram. Exige conta no Roboflow ou Kaggle pra baixar o dataset (decisão/ação do Eric na hora) e algumas horas de GPU.
 

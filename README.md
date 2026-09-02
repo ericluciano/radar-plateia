@@ -17,5 +17,10 @@ Codigo em `web/`: app de navegador com 6 modos (Atencao, Exercicio, Produtividad
 varias cameras na mesma tela, aviso por voz/apito, relatorio de sessao com CSV e medidor de ruido. Nada sai da maquina.
 - Modo Seguranca: detecta pessoas e avisa quem esta sem colete de alta visibilidade (e, opcionalmente, capacete) ha mais de
   X segundos. Leitura por cor no torso/topo de cada pessoa; capacete e aproximado. Modelos MediaPipe embarcados (Apache 2.0).
+- Quem e quem: postos/assentos mapeados por camera (arrasta um retangulo, da nome) e, opcionalmente, reconhecimento facial
+  com consentimento (LGPD art. 11; cadastro pela propria camera, assinatura numerica so neste navegador, apagar imediato;
+  motor face-api, MIT). O nome entra nos avisos e nas estatisticas.
+- Relatorio: curva com pontos de queda, alerta da sala inteira, mapa de calor por fileira/cadeira, presenca (entradas,
+  saidas, pico), grito/pico de ruido, CSV, impressao/PDF e historico de sessoes no navegador. Modo telao pra projetar.
 - Testes unitarios: `cd web && npm test` | E2E: `python web/tests/e2e/run_all.py` (ver `web/tests/e2e/README.md`)
 - Roteiro, decisoes tomadas e proximas entregas: `docs/ROADMAP.md`

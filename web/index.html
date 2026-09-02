@@ -41,6 +41,8 @@
         <button class="btn-principal" id="btn-ligar">Ligar c&acirc;meras</button>
       </div>
       <button class="btn-tela-cheia" id="btn-fs" title="Tela cheia" hidden>&#x26F6;</button>
+      <button class="btn-tela-cheia btn-telao" id="btn-telao" title="Modo tel&atilde;o: s&oacute; os n&uacute;meros, sem mostrar a c&acirc;mera (duplo clique sai)" hidden>TEL&Atilde;O</button>
+      <div class="telao" id="telao" hidden></div>
     </div>
   </section>
 
@@ -77,6 +79,11 @@
           <button data-v="apito">Apito</button>
           <button data-v="voz">Voz</button>
           <button data-v="silencioso">Silencioso</button>
+        </div>
+        <div id="campo-voz" class="sub-campo" hidden>
+          <label for="sel-voz">Voz</label>
+          <select id="sel-voz"></select>
+          <small class="dica">Voz instalada no Windows n&atilde;o corta. No Edge existe a "Antonio (Natural)", a mesma dos avisos do PC; no Chrome, prefira Microsoft Daniel ou Maria (a voz "Google" &eacute; online e picota).</small>
         </div>
       </div>
       <div class="campo dupla">
@@ -115,17 +122,41 @@
     </section>
 
     <section class="painel" id="painel-relatorio">
-      <h2>Relat&oacute;rio da sess&atilde;o <button class="btn-limpar" id="btn-csv" disabled title="Baixa a planilha com a evolu&ccedil;&atilde;o e os avisos">baixar CSV</button></h2>
+      <h2>Relat&oacute;rio da sess&atilde;o <span><button class="btn-limpar" id="btn-print" disabled title="Abre a impress&atilde;o do navegador: escolha 'Salvar como PDF' pra gerar o PDF">imprimir / PDF</button> <button class="btn-limpar" id="btn-csv" disabled title="Baixa a planilha com a evolu&ccedil;&atilde;o e os avisos">baixar CSV</button></span></h2>
       <div class="rel-grid" id="rel-grid"></div>
       <canvas id="curva" class="curva"></canvas>
       <small class="dica" id="curva-legenda" hidden><i class="ponto-queda"></i> ponto de queda: a taxa caiu 20 pontos ou mais em poucos segundos</small>
       <div id="heat" class="heat-wrap"></div>
-      <p class="dica">Come&ccedil;a a contar quando as c&acirc;meras ligam; ao parar, fica dispon&iacute;vel pra exportar.</p>
+      <p class="dica">Come&ccedil;a a contar quando as c&acirc;meras ligam; ao parar, fica dispon&iacute;vel pra exportar e entra no hist&oacute;rico abaixo.</p>
+    </section>
+
+    <section class="painel" id="painel-historico">
+      <h2>Sess&otilde;es anteriores</h2>
+      <ul class="sessoes" id="lista-sessoes"><li class="vazio">carregando…</li></ul>
+      <small class="dica">Guardadas s&oacute; neste navegador (n&uacute;meros e avisos, nenhuma imagem). "abrir" traz a sess&atilde;o pro painel de relat&oacute;rio com CSV e impress&atilde;o.</small>
     </section>
 
     <section class="painel">
       <h2>C&acirc;meras <button class="btn-limpar" id="btn-add-cam" title="Adicionar mais uma c&acirc;mera">+ adicionar</button></h2>
       <p class="dica">Cada c&acirc;mera vira uma c&eacute;lula na tela: escolha o aparelho e d&ecirc; o nome do ambiente (ex.: "Sala 2"). Os avisos falam o nome da c&acirc;mera; os contadores somam todas.</p>
+    </section>
+
+    <section class="painel" id="painel-facial">
+      <h2>Identifica&ccedil;&atilde;o <span class="mono status" id="facial-status"></span></h2>
+      <label class="check"><input type="checkbox" id="chk-facial"> Reconhecer pessoas cadastradas pelo rosto <small>(opcional; tudo fica neste navegador)</small></label>
+      <div id="facial-corpo" hidden>
+        <div class="consent">
+          <p>Rosto &eacute; dado biom&eacute;trico, sens&iacute;vel pela LGPD (art. 11). Cadastre s&oacute; quem assinou consentimento. Nenhuma foto &eacute; guardada: fica uma assinatura num&eacute;rica do rosto, s&oacute; neste computador. Apagar &eacute; imediato.</p>
+          <label class="check"><input type="checkbox" id="chk-consent"> Tenho o consentimento por escrito de cada pessoa cadastrada</label>
+        </div>
+        <div class="cadastro">
+          <select id="sel-cad-cam" title="Em qual c&acirc;mera a pessoa est&aacute;"></select>
+          <input id="inp-cad-nome" placeholder="Nome da pessoa" maxlength="40">
+          <button class="btn-mini" id="btn-cadastrar" title="A pessoa precisa estar sozinha na frente dessa c&acirc;mera">Cadastrar rosto</button>
+        </div>
+        <ul class="pessoas" id="lista-pessoas"></ul>
+        <small class="dica">Reconhecer pede rosto com pelo menos ~50 px de largura. Sem cadastro, o app segue com posto/assento e fileira/cadeira. Duas ou mais amostras (&acirc;ngulos/luz diferentes) acertam mais.</small>
+      </div>
     </section>
 
     <section class="painel" id="painel-stats" hidden>
@@ -139,6 +170,8 @@
     </section>
   </aside>
 </main>
+
+<div id="print-rel" class="print-rel" aria-hidden="true"></div>
 
 <footer class="rodape">
   <span>Radar da Plateia &middot; Expert Integrado &middot; a c&acirc;mera &eacute; processada dentro do seu navegador</span>

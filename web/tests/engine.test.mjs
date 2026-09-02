@@ -6,6 +6,7 @@ import {
   RIGOR_EPI, rgb2hsv, altaVisibilidade, analisarCores, regioesEpi, regioesEpiPorRosto, rostoDaPessoa, amostraEpi, estadoEpi,
   rotuloEpi, fraseEpi, casarPorIou, detectarPico,
   taxaDaAmostra, pontosDeQueda, alertaSala, acumularHeat, gradeHeatmap, postoDe, normalizarRect,
+  distanciaEuclidiana, maisProximo, votarNome, mediana3, resumoPresenca, compactarSessao, expandirHeat,
 } from "../engine.js";
 
 // pixels RGBA repetidos n vezes
@@ -290,6 +291,45 @@ test("acumularHeat e gradeHeatmap: fração do tempo em alerta por fileira/cadei
   assert.equal(g.celulas[1][2].pct, 1);
   assert.equal(g.celulas[0][1], null); assert.equal(g.celulas[1][0], null);
   assert.deepEqual(gradeHeatmap(new Map()), { fileiras: 0, cadeiras: 0, celulas: [] });
+});
+
+test("resumoPresenca: entradas/saídas sobre a série filtrada, pico e horário, primeira/última com gente", () => {
+  assert.deepEqual(mediana3([0, 5, 0, 5, 5, 5, 9, 5]), [0, 0, 5, 5, 5, 5, 5, 5], "pisca de 1 amostra some");
+  const am = (t, n) => ({ t, pessoas: n, ok: n, alerta: 0 });
+  const r = resumoPresenca([am(0, 0), am(5, 2), am(10, 2), am(15, 5), am(20, 5), am(25, 4), am(30, 4), am(35, 0), am(40, 0)]);
+  assert.equal(r.pico, 5); assert.equal(r.picoT, 15);
+  assert.equal(r.entradas, 5); assert.equal(r.saidas, 5);
+  assert.equal(r.primeiraT, 5); assert.equal(r.ultimaT, 30);
+  assert.deepEqual(resumoPresenca([]), { entradas: 0, saidas: 0, pico: 0, picoT: null, primeiraT: null, ultimaT: null });
+});
+
+test("compactarSessao e expandirHeat: registro compacto com heat por câmera que volta a ser Map", () => {
+  const heat = new Map([["1-1", { f: 1, c: 1, total: 4, alerta: 1 }]]);
+  const sessao = { inicio: 100, inicioWall: 1700000000000, passoS: 5, amostras: [{ t: 105.123, pessoas: 3, ok: 2, alerta: 1, ruido: 33 }], avisos: [{ t: 106.77, texto: "x" }], picos: 2 };
+  const reg = compactarSessao(sessao, "atencao", [{ nome: "Sala", heat }]);
+  assert.equal(reg.id, 1700000000000); assert.equal(reg.modo, "atencao"); assert.equal(reg.fimT, 105.123);
+  assert.deepEqual(reg.amostras[0], { t: 105.1, pessoas: 3, ok: 2, alerta: 1, ruido: 33 });
+  assert.deepEqual(reg.avisos[0], { t: 106.8, texto: "x" });
+  assert.equal(reg.picos, 2);
+  assert.deepEqual(reg.heat, [{ nome: "Sala", celulas: [{ f: 1, c: 1, total: 4, alerta: 1 }] }]);
+  const m = expandirHeat(reg.heat[0].celulas);
+  assert.equal(m.get("1-1").alerta, 1);
+  assert.equal(expandirHeat(undefined).size, 0);
+});
+
+test("maisProximo e votarNome: menor distância dentro do limiar; maioria de 3 em 5 pra fixar o nome", () => {
+  const z = Array(128).fill(0), quase = [0.3, ...Array(127).fill(0)], longe = [1, ...Array(127).fill(0)];
+  assert.ok(Math.abs(distanciaEuclidiana(z, quase) - 0.3) < 1e-9);
+  const pessoas = [{ nome: "Ana", descs: [longe] }, { nome: "Bia", descs: [longe, quase] }];
+  const r = maisProximo(z, pessoas);
+  assert.equal(r.pessoa.nome, "Bia"); assert.ok(Math.abs(r.dist - 0.3) < 1e-9);
+  assert.equal(maisProximo(z, [{ nome: "Ana", descs: [longe] }]), null, "acima do limiar = desconhecido");
+  assert.equal(maisProximo(z, pessoas, 0.2), null, "limiar mais rigoroso");
+  assert.equal(maisProximo(z, [{ nome: "X", descs: [[1, 2, 3]] }]), null, "assinatura de tamanho diferente é ignorada");
+  assert.equal(votarNome(["Ana", "Ana", null, "Ana", "Bia"]), "Ana");
+  assert.equal(votarNome(["Ana", "Bia", null, "Ana", "Bia"]), null, "sem maioria de 3");
+  assert.equal(votarNome(["Ana", "Ana", "Ana", "Bia", "Bia", "Bia", "Bia"]), "Bia", "só as últimas 5 contam");
+  assert.equal(votarNome([]), null);
 });
 
 test("detectarPico: grito sobre fundo calmo sim; barulho constante, subida lenta e histórico curto não", () => {

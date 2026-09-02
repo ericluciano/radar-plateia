@@ -2,7 +2,7 @@
 import os, subprocess, sys
 AQUI = os.path.dirname(os.path.abspath(__file__))
 py = sys.executable
-passos = ["gerar_videos.py", "test_web.py", "test_multicam_fake.py", "test_seguranca_fake.py", "test_postos_fake.py"]
+passos = ["gerar_videos.py", "test_web.py", "test_multicam_fake.py", "test_seguranca_fake.py", "test_postos_fake.py", "test_facial_fake.py", "test_historico_fake.py"]
 falhas = 0
 for s in passos:
     print(f"\n=== {s} ===")
