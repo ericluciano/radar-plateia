@@ -183,19 +183,19 @@ export function regioesEpi([x, y, w, h]) {
 /**
  * Regiões ANCORADAS no rosto (bem mais robusto que a proporção da caixa, que erra em pessoa sentada/perto da câmera):
  * capacete = da testa pra cima; colete = abaixo do queixo/pescoço, largura de ombros. Tudo recortado à caixa da pessoa.
- * Devolve null quando o torso não cabe na caixa (rosto no pé da caixa) — aí o chamador usa regioesEpi(caixa).
+ * `torsoVisivel`/`cabecaVisivel` = false quando a região quase não cabe no quadro (pessoa colada na câmera ou cortada):
+ * aí a leitura daquele item é INDEFINIDA — nunca vira "sem colete" falso.
  */
 export function regioesEpiPorRosto([x, y, w, h], [fx, fy, fw, fh]) {
   const cx = fx + fw / 2;
-  const clip = ([rx, ry, rw, rh]) => {
-    const x1 = Math.max(rx, x), y1 = Math.max(ry, y), x2 = Math.min(rx + rw, x + w), y2 = Math.min(ry + rh, y + h);
-    return [x1, y1, Math.max(1, x2 - x1), Math.max(0, y2 - y1)];
+  const clip = ([rx, ry, rw, rh]) => { // origem presa dentro da caixa, tamanho mínimo 1px
+    const x1 = Math.min(Math.max(rx, x), x + w - 1), y1 = Math.min(Math.max(ry, y), y + h - 1);
+    const x2 = Math.min(rx + rw, x + w), y2 = Math.min(ry + rh, y + h);
+    return [x1, y1, Math.max(1, x2 - x1), Math.max(1, y2 - y1)];
   };
   const colete = clip([cx - 1.2 * fw, fy + 1.25 * fh, 2.4 * fw, 1.7 * fh]);
-  if (colete[3] < 0.5 * fh) return null;
   const capacete = clip([cx - 0.7 * fw, fy - 0.85 * fh, 1.4 * fw, 0.95 * fh]);
-  if (capacete[3] < 1) capacete[3] = 1;
-  return { colete, capacete };
+  return { colete, capacete, torsoVisivel: colete[3] >= 0.35 * fh, cabecaVisivel: capacete[3] >= 0.3 * fh };
 }
 
 /** Rosto que pertence à pessoa: centro dentro da caixa, na metade de cima; se houver mais de um, o maior. */
@@ -220,18 +220,22 @@ export function amostraEpi({ torso, topo }, rigor = "normal") {
 }
 
 /**
- * Estado suavizado da pessoa: item "tem" se >= 2 das últimas 6 amostras disseram tem (a leitura por cor falha
- * em quadro isolado). Menos de 3 amostras = ainda lendo (conforme null). `obrigatorios` = {colete, capacete}.
+ * Estado suavizado da pessoa: item "tem" se >= 2 das últimas 6 amostras LIDAS disseram tem (a leitura por cor falha
+ * em quadro isolado). Amostra null = região fora do quadro, não conta pra nenhum lado. Menos de 3 amostras (ou menos
+ * de 3 lidas de um item) = indefinido. `obrigatorios` = {colete, capacete}.
+ * conforme: true (tudo ok) | false (falta algo) | null (ainda lendo / sem leitura de item obrigatório).
  */
 export function estadoEpi(hist, obrigatorios) {
   const rec = hist.slice(-6);
-  if (rec.length < 3) return { conforme: null, faltando: [] };
-  const faltando = [];
+  if (rec.length < 3) return { conforme: null, faltando: [], indefinidos: [] };
+  const faltando = [], indefinidos = [];
   for (const item of ["colete", "capacete"]) {
     if (!obrigatorios?.[item]) continue;
-    if (rec.filter(a => a && a[item]).length < 2) faltando.push(item);
+    const lidos = rec.filter(a => a && a[item] != null);
+    if (lidos.length < 3) { indefinidos.push(item); continue; }
+    if (lidos.filter(a => a[item]).length < 2) faltando.push(item);
   }
-  return { conforme: faltando.length === 0, faltando };
+  return { conforme: faltando.length ? false : indefinidos.length ? null : true, faltando, indefinidos };
 }
 
 export const rotuloEpi = (faltando) => faltando.length ? "SEM " + faltando.map(f => f.toUpperCase()).join(" E ") : "";

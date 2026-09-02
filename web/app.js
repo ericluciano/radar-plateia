@@ -306,6 +306,8 @@ function amostrarEpi(cam, dets, rostos = []) {
     d.regioes = porRosto || regioesEpi(d.box);
     d.ancora = porRosto ? "rosto" : "caixa";
     d.epi = amostraEpi({ torso: pega(d.regioes.colete), topo: pega(d.regioes.capacete) }, cfg.epi.rigor);
+    if (porRosto && !porRosto.torsoVisivel) d.epi.colete = null;     // torso fora do quadro: sem leitura, não "sem colete"
+    if (porRosto && !porRosto.cabecaVisivel) d.epi.capacete = null;
   }
 }
 
@@ -460,7 +462,11 @@ function avaliarSeguranca(cam, agora) {
     const dt = Math.min(agora - tr.ultimoTick, 1); tr.ultimoTick = agora;
     const est = estadoEpi(tr.hist, cfg.epi);
     tr.faltando = est.faltando;
-    if (est.conforme === null) { tr.estado = "calib"; tr.rotulo = "lendo…"; continue; }
+    if (est.conforme === null) {
+      tr.estado = "calib";
+      tr.rotulo = est.indefinidos.length ? `SEM LEITURA (${est.indefinidos.includes("colete") ? "torso" : "cabeça"} fora do quadro)` : "lendo…";
+      continue;
+    }
     tr.totalS += dt;
     if (est.conforme) {
       tr.semEpiDesde = null; tr.avisado = false; tr.estado = "ok"; tr.rotulo = "EPI OK"; bons++; continue;

@@ -154,14 +154,20 @@ test("altaVisibilidade: amarelo e laranja fluorescentes sim; marinho, pele, gram
   assert.equal(altaVisibilidade(...rgb2hsv(...BRANCO)), false);
 });
 
-test("regioesEpiPorRosto: colete abaixo do queixo, capacete acima da testa, tudo dentro da caixa; rosto no pé = null", () => {
+test("regioesEpiPorRosto: colete abaixo do queixo, capacete acima da testa, dentro da caixa; fora do quadro = indefinido", () => {
   const caixa = [60, 20, 160, 400], rosto = [100, 50, 60, 60];
   const r = regioesEpiPorRosto(caixa, rosto);
   assert.ok(r.colete[1] >= 110, "colete começa abaixo do queixo");
   assert.ok(r.capacete[1] + r.capacete[3] <= 60, "capacete termina na testa");
   assert.equal(r.capacete[1], 20, "recortado ao topo da caixa");
-  for (const [x, y, w, h] of Object.values(r)) assert.ok(x >= 60 && y >= 20 && x + w <= 220 + 1e-9 && y + h <= 420 + 1e-9 && w > 0 && h > 0);
-  assert.equal(regioesEpiPorRosto(caixa, [100, 380, 60, 60]), null, "rosto no pé da caixa: torso não cabe");
+  assert.equal(r.torsoVisivel, true); assert.equal(r.cabecaVisivel, true);
+  for (const [x, y, w, h] of [r.colete, r.capacete]) assert.ok(x >= 60 && y >= 20 && x + w <= 220 + 1e-9 && y + h <= 420 + 1e-9 && w > 0 && h > 0);
+  const pe = regioesEpiPorRosto(caixa, [100, 380, 60, 60]);
+  assert.equal(pe.torsoVisivel, false, "rosto no pé da caixa: torso não cabe -> sem leitura de colete");
+  assert.ok(pe.colete[1] + pe.colete[3] <= 420 + 1e-9, "mesmo assim a região fica dentro da caixa");
+  const topo = regioesEpiPorRosto(caixa, [100, 20, 60, 60]);
+  assert.equal(topo.cabecaVisivel, false, "rosto colado no topo: não dá pra ver o capacete");
+  assert.equal(topo.torsoVisivel, true);
 });
 
 test("rostoDaPessoa: rosto com centro na metade de cima da caixa; maior vence; fora = null", () => {
@@ -210,15 +216,20 @@ test("amostraEpi: limiares por rigor (normal 10% de colete; capacete por cor OU 
 
 test("estadoEpi: ainda lendo com <3 amostras; 2 de 6 positivas = tem; só itens obrigatórios contam", () => {
   const sem = { colete: false, capacete: false }, com = { colete: true, capacete: false };
-  assert.deepEqual(estadoEpi([sem, sem], { colete: true }), { conforme: null, faltando: [] });
-  assert.deepEqual(estadoEpi([sem, sem, sem], { colete: true }), { conforme: false, faltando: ["colete"] });
-  assert.deepEqual(estadoEpi([sem, sem, sem, com, sem, com], { colete: true }), { conforme: true, faltando: [] });
-  assert.deepEqual(estadoEpi([sem, sem, sem, com, sem, com], { colete: true, capacete: true }), { conforme: false, faltando: ["capacete"] });
+  assert.deepEqual(estadoEpi([sem, sem], { colete: true }), { conforme: null, faltando: [], indefinidos: [] });
+  assert.deepEqual(estadoEpi([sem, sem, sem], { colete: true }), { conforme: false, faltando: ["colete"], indefinidos: [] });
+  assert.deepEqual(estadoEpi([sem, sem, sem, com, sem, com], { colete: true }), { conforme: true, faltando: [], indefinidos: [] });
+  assert.deepEqual(estadoEpi([sem, sem, sem, com, sem, com], { colete: true, capacete: true }), { conforme: false, faltando: ["capacete"], indefinidos: [] });
   assert.deepEqual(estadoEpi([sem, sem, sem], { colete: true, capacete: true }).faltando, ["colete", "capacete"]);
-  assert.deepEqual(estadoEpi([sem, sem, sem], { colete: false, capacete: false }), { conforme: true, faltando: [] });
+  assert.deepEqual(estadoEpi([sem, sem, sem], { colete: false, capacete: false }), { conforme: true, faltando: [], indefinidos: [] });
   // janela de 6: um "com" antigo não segura o estado
   const hist = [com, com, sem, sem, sem, sem, sem, sem];
   assert.equal(estadoEpi(hist, { colete: true }).conforme, false);
+  // torso fora do quadro (amostra null) = indefinido, nunca "sem colete"
+  const foraDoQuadro = { colete: null, capacete: false };
+  assert.deepEqual(estadoEpi([foraDoQuadro, foraDoQuadro, foraDoQuadro], { colete: true }), { conforme: null, faltando: [], indefinidos: ["colete"] });
+  assert.deepEqual(estadoEpi([foraDoQuadro, foraDoQuadro, foraDoQuadro], { colete: true, capacete: true }), { conforme: false, faltando: ["capacete"], indefinidos: ["colete"] });
+  assert.equal(estadoEpi([foraDoQuadro, sem, sem, sem], { colete: true }).conforme, false, "3 leituras válidas bastam mesmo com uma null no meio");
 });
 
 test("rotuloEpi e fraseEpi", () => {
