@@ -4,7 +4,8 @@ import {
   iou, contencao, dedupe, geometria, mediana, formataDur, zonas,
   fileirasECadeiras, classificarNota, resumoSessao, csvRelatorio, valido, SCORE_MIN,
   RIGOR_EPI, rgb2hsv, altaVisibilidade, analisarCores, regioesEpi, regioesEpiPorRosto, rostoDaPessoa, amostraEpi, estadoEpi,
-  rotuloEpi, fraseEpi, casarPorIou,
+  rotuloEpi, fraseEpi, casarPorIou, detectarPico,
+  taxaDaAmostra, pontosDeQueda, alertaSala, acumularHeat, gradeHeatmap, postoDe, normalizarRect,
 } from "../engine.js";
 
 // pixels RGBA repetidos n vezes
@@ -237,6 +238,72 @@ test("rotuloEpi e fraseEpi", () => {
   assert.equal(rotuloEpi(["colete"]), "SEM COLETE");
   assert.equal(rotuloEpi(["colete", "capacete"]), "SEM COLETE E CAPACETE");
   assert.equal(fraseEpi(["colete", "capacete"]), "colete e capacete");
+});
+
+test("pontosDeQueda: marca a 1ª amostra de cada queda >= 20 pontos; sala vazia não conta", () => {
+  const am = (t, ok, alerta) => ({ t, ok, alerta, pessoas: ok + alerta });
+  const amostras = [am(0, 10, 0), am(5, 9, 1), am(10, 5, 5), am(15, 4, 6), am(20, 9, 1), am(25, 0, 0), am(30, 3, 7)];
+  const q = pontosDeQueda(amostras);
+  assert.equal(q.length, 2);
+  assert.deepEqual(q[0], { i: 2, t: 10, de: 100, para: 50 });
+  assert.equal(q[1].i, 6, "depois da sala vazia (null) recomeça a comparação com a amostra 20s");
+  assert.equal(taxaDaAmostra(am(0, 0, 0)), null);
+  assert.equal(pontosDeQueda([]).length, 0);
+  assert.equal(pontosDeQueda(amostras, { queda: 60 }).length, 2, "100->40 e 90->30 são quedas de exatamente 60");
+  assert.equal(pontosDeQueda(amostras, { queda: 70 }).length, 0);
+});
+
+test("postoDe e normalizarRect: posto pelo centro da caixa, menor posto vence, coordenadas normalizadas", () => {
+  const postos = [
+    { id: "a", nome: "Posto 1", box: [0, 0, 0.5, 1] },
+    { id: "b", nome: "Mesa do João", box: [0.1, 0.1, 0.2, 0.3] }, // dentro do Posto 1, menor
+    { id: "c", nome: "Posto 2", box: [0.5, 0, 0.5, 1] },
+  ];
+  assert.equal(postoDe([180, 180, 40, 40], postos, 1000, 1000).nome, "Mesa do João");
+  assert.equal(postoDe([400, 800, 40, 40], postos, 1000, 1000).nome, "Posto 1");
+  assert.equal(postoDe([900, 100, 40, 40], postos, 1000, 1000).nome, "Posto 2");
+  assert.equal(postoDe([900, 100, 40, 40], [], 1000, 1000), null);
+  assert.deepEqual(normalizarRect(300, 200, 100, 100, 1000, 500), [0.1, 0.2, 0.2, 0.2], "arrasto em qualquer direção");
+  const r = normalizarRect(-50, -50, 2000, 600, 1000, 500);
+  assert.deepEqual(r, [0, 0, 1, 1], "preso ao quadro");
+  assert.equal(normalizarRect(100, 100, 101, 101, 1000, 500), null, "arrasto minúsculo não vira posto");
+});
+
+test("alertaSala: abaixo do limiar por 30 s contados do fim; volta acima zera", () => {
+  const am = (t, ok, alerta) => ({ t, ok, alerta, pessoas: ok + alerta });
+  const ruim = [am(0, 8, 2), am(5, 4, 6), am(10, 3, 7), am(15, 4, 6), am(20, 2, 8), am(25, 3, 7), am(30, 4, 6), am(35, 3, 7)];
+  const s = alertaSala(ruim, 40);
+  assert.equal(s.ativo, true); assert.equal(s.desde, 5); assert.equal(s.taxa, 30);
+  assert.equal(alertaSala(ruim, 30).ativo, false, "ainda não deu 30 s");
+  assert.equal(alertaSala([...ruim, am(40, 9, 1)], 45).ativo, false, "última amostra boa interrompe a sequência");
+  assert.equal(alertaSala([], 10).ativo, false);
+  assert.equal(alertaSala(ruim, 40, { limiar: 20 }).ativo, false, "limiar mais baixo: 30% não é alerta");
+});
+
+test("acumularHeat e gradeHeatmap: fração do tempo em alerta por fileira/cadeira", () => {
+  const heat = new Map();
+  acumularHeat(heat, [1, 1], 1, false); acumularHeat(heat, [1, 1], 1, true);
+  acumularHeat(heat, [2, 3], 2, true);
+  const g = gradeHeatmap(heat);
+  assert.equal(g.fileiras, 2); assert.equal(g.cadeiras, 3);
+  assert.equal(g.celulas[0][0].pct, 0.5); assert.equal(g.celulas[0][0].total, 2);
+  assert.equal(g.celulas[1][2].pct, 1);
+  assert.equal(g.celulas[0][1], null); assert.equal(g.celulas[1][0], null);
+  assert.deepEqual(gradeHeatmap(new Map()), { fileiras: 0, cadeiras: 0, celulas: [] });
+});
+
+test("detectarPico: grito sobre fundo calmo sim; barulho constante, subida lenta e histórico curto não", () => {
+  const serie = (niveis, passo = 0.1) => niveis.map((n, i) => ({ t: i * passo, nivel: n }));
+  const calmo = Array(25).fill(30);
+  const grito = detectarPico(serie([...calmo, 92]), 2.5);
+  assert.equal(grito.pico, true); assert.equal(grito.nivel, 92); assert.equal(grito.base, 30);
+  assert.equal(detectarPico(serie([...calmo, 55]), 2.5).pico, false, "subiu mas não passou do mínimo");
+  assert.equal(detectarPico(serie(Array(26).fill(90)), 2.5).pico, false, "barulho alto constante não é pico");
+  const lenta = serie(Array.from({ length: 31 }, (_, i) => 30 + i * 2)); // 30 -> 90 em 3 s
+  assert.equal(detectarPico(lenta, 3).pico, false, "subida lenta: a mediana acompanha");
+  assert.equal(detectarPico(serie([30, 95]), 0.1).pico, false, "sem histórico não decide");
+  assert.equal(detectarPico([], 0).pico, false);
+  assert.equal(detectarPico(serie([...calmo, 70]), 2.5, { minimo: 60, salto: 20 }).pico, true, "limiares configuráveis");
 });
 
 test("casarPorIou: melhor par primeiro, sem reutilizar, sobras voltam como livres", () => {

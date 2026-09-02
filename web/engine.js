@@ -241,6 +241,102 @@ export function estadoEpi(hist, obrigatorios) {
 export const rotuloEpi = (faltando) => faltando.length ? "SEM " + faltando.map(f => f.toUpperCase()).join(" E ") : "";
 export const fraseEpi = (faltando) => faltando.join(" e ");
 
+// ------------------------------------------------------------------ curva da sala: quedas, alerta coletivo, heatmap
+
+export const taxaDaAmostra = (a) => a.ok + a.alerta ? 100 * a.ok / (a.ok + a.alerta) : null;
+
+/**
+ * Pontos de queda da atenção: amostra cuja taxa caiu `queda` pontos ou mais em relação ao MÁXIMO das `janela`
+ * amostras anteriores. Uma queda contínua conta 1 vez (o primeiro ponto). Retorna [{i, t, de, para}].
+ */
+export function pontosDeQueda(amostras, { queda = 20, janela = 3 } = {}) {
+  const taxas = amostras.map(taxaDaAmostra);
+  const out = [];
+  let emQueda = false;
+  for (let i = 1; i < taxas.length; i++) {
+    const t = taxas[i];
+    if (t == null) { emQueda = false; continue; }
+    const prev = taxas.slice(Math.max(0, i - janela), i).filter(v => v != null);
+    if (!prev.length) continue;
+    const ref = Math.max(...prev);
+    if (ref - t >= queda) {
+      if (!emQueda) out.push({ i, t: amostras[i].t, de: Math.round(ref), para: Math.round(t) });
+      emQueda = true;
+    } else emQueda = false;
+  }
+  return out;
+}
+
+/** Alerta coletivo: a taxa da sala está abaixo de `limiar` há pelo menos `duracaoS` (contado do fim). */
+export function alertaSala(amostras, agora, { limiar = 60, duracaoS = 30 } = {}) {
+  let desde = null;
+  for (let i = amostras.length - 1; i >= 0; i--) {
+    const t = taxaDaAmostra(amostras[i]);
+    if (t == null || t >= limiar) break;
+    desde = amostras[i].t;
+  }
+  const taxa = amostras.length ? taxaDaAmostra(amostras[amostras.length - 1]) : null;
+  return { ativo: desde != null && agora - desde >= duracaoS, desde, taxa };
+}
+
+/** Acumula tempo total e tempo em alerta por posição [fileira, cadeira] (Map mutável). */
+export function acumularHeat(heat, pos, dt, alerta) {
+  const k = pos.join("-");
+  const c = heat.get(k) || { f: pos[0], c: pos[1], total: 0, alerta: 0 };
+  c.total += dt; if (alerta) c.alerta += dt;
+  heat.set(k, c);
+  return heat;
+}
+
+/** Grade fileiras x cadeiras com a fração do tempo em alerta por posição (null = ninguém sentou ali). */
+export function gradeHeatmap(heat) {
+  const cel = [...heat.values()].filter(c => c.total > 0);
+  if (!cel.length) return { fileiras: 0, cadeiras: 0, celulas: [] };
+  const fileiras = Math.max(...cel.map(c => c.f)), cadeiras = Math.max(...cel.map(c => c.c));
+  const celulas = Array.from({ length: fileiras }, () => Array(cadeiras).fill(null));
+  for (const c of cel) celulas[c.f - 1][c.c - 1] = { pct: c.alerta / c.total, total: c.total };
+  return { fileiras, cadeiras, celulas };
+}
+
+// ------------------------------------------------------------------ postos / assentos (mapa por câmera)
+
+/** Posto que contém o CENTRO da caixa (coordenadas do quadro W x H; postos em 0-1). Sobreposição: o menor vence. */
+export function postoDe(box, postos, W, H) {
+  const cx = (box[0] + box[2] / 2) / W, cy = (box[1] + box[3] / 2) / H;
+  let melhor = null;
+  for (const p of postos) {
+    const [x, y, w, h] = p.box;
+    if (cx >= x && cx <= x + w && cy >= y && cy <= y + h && (!melhor || w * h < melhor.box[2] * melhor.box[3])) melhor = p;
+  }
+  return melhor;
+}
+
+/** Arrasto (2 cantos, em pixels do quadro) -> retângulo normalizado 0-1 preso ao quadro; null se minúsculo (< 2% de lado). */
+export function normalizarRect(x1, y1, x2, y2, W, H) {
+  const cl = (v) => Math.max(0, Math.min(1, v));
+  const ax = cl(Math.min(x1, x2) / W), ay = cl(Math.min(y1, y2) / H), bx = cl(Math.max(x1, x2) / W), by = cl(Math.max(y1, y2) / H);
+  const w = bx - ax, h = by - ay;
+  if (w < 0.02 || h < 0.02) return null;
+  const r4 = (v) => Math.round(v * 10000) / 10000;
+  return [r4(ax), r4(ay), r4(w), r4(h)];
+}
+
+// ------------------------------------------------------------------ ruído: grito / pico
+
+/**
+ * Grito ou pico de ruído: o nível BRUTO (não suavizado) do instante sobe `salto` acima da mediana dos ~2 s
+ * anteriores e passa de `minimo`. Barulho alto CONSTANTE não é pico (a mediana sobe junto); subida lenta também não.
+ * hist = [{t, nivel}] em ordem; precisa de pelo menos 1 s de histórico antes do instante.
+ */
+export function detectarPico(hist, agora, { minimo = 80, salto = 30, janelaS = 2 } = {}) {
+  if (hist.length < 2) return { pico: false, nivel: null, base: null };
+  const atual = hist[hist.length - 1];
+  const antes = hist.filter(a => a.t < atual.t - 0.15 && a.t >= atual.t - janelaS).map(a => a.nivel);
+  if (antes.length < 3 || atual.t - hist[0].t < 1) return { pico: false, nivel: atual.nivel, base: null };
+  const base = mediana(antes);
+  return { pico: atual.nivel >= minimo && atual.nivel - base >= salto, nivel: atual.nivel, base };
+}
+
 /** Casa tracks com detecções pelo maior IoU (greedy). Devolve os pares e as detecções que sobraram. */
 export function casarPorIou(tracks, dets, minIou = 0.25) {
   const cand = [];

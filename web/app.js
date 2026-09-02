@@ -3,6 +3,7 @@ import { FaceDetector, ObjectDetector, FilesetResolver } from "./vendor/tasks-vi
 import {
   valido, dedupe, geometria, mediana, formataDur, zonas, fileirasECadeiras, resumoSessao, csvRelatorio,
   analisarCores, regioesEpi, regioesEpiPorRosto, rostoDaPessoa, amostraEpi, estadoEpi, rotuloEpi, fraseEpi, casarPorIou,
+  detectarPico, pontosDeQueda, alertaSala, acumularHeat, gradeHeatmap, postoDe, normalizarRect,
 } from "./engine.js";
 
 const BUILD = "RADAR_V3_BUILD_20260902F";
@@ -47,6 +48,7 @@ const ENG = {
   yawDev: 0.42, ghostStable: 5, ghostTtl: 16,
   pitchFrontalAbs: 0.35, moveFrac: 0.14,
   ruidoAlto: 70, ruidoBaixo: 15,
+  picoMin: 80, picoSalto: 30, picoGapS: 10, // grito/pico: nível bruto >= 80 e salto >= 30 sobre a mediana dos 2 s anteriores
 };
 
 // ------------------------------------------------------------------ estado global
@@ -72,13 +74,15 @@ const esc = (s) => String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt
 // ------------------------------------------------------------------ config persistente
 function carregarCfg() {
   const base = {
-    modo: "atencao", aviso: "voz", gap: 20, volume: 70, espelho: false, alcance: "longe", ruido: false,
+    modo: "atencao", aviso: "voz", gap: 20, volume: 70, espelho: false, alcance: "longe", ruido: false, pico: true,
+    salaPct: 60, // alerta coletivo: taxa da sala abaixo disso por 30 s (0 = desligado)
     segundos: {}, cams: [{ deviceId: null, nome: "Câmera 1" }],
+    postos: {}, // chave da câmera -> [{id, nome, box normalizado}]
     epi: { colete: true, capacete: false, rigor: "normal" },
   };
   try {
     const s = JSON.parse(localStorage.getItem("radar.cfg.v1") || "{}");
-    const out = { ...base, ...s, segundos: { ...(s.segundos || {}) }, epi: { ...base.epi, ...(s.epi || {}) } };
+    const out = { ...base, ...s, segundos: { ...(s.segundos || {}) }, epi: { ...base.epi, ...(s.epi || {}) }, postos: { ...(s.postos || {}) } };
     if (!Array.isArray(s.cams) || !s.cams.length) out.cams = [{ deviceId: s.camera || null, nome: "Câmera 1" }];
     return out;
   } catch { return base; }
@@ -151,7 +155,8 @@ function registrarLog(texto) {
 }
 
 // ------------------------------------------------------------------ ruído da sala (microfone)
-const ruido = { ativo: false, nivel: null, analyser: null, stream: null, dados: null, altoDesde: null, baixoDesde: null, avisouAlto: false, avisouBaixo: false };
+const ruido = { ativo: false, nivel: null, analyser: null, stream: null, dados: null, altoDesde: null, baixoDesde: null, avisouAlto: false, avisouBaixo: false,
+                hist: [], ultimoPico: -Infinity };
 async function ligarRuido() {
   try {
     garantirAudio();
@@ -169,7 +174,7 @@ async function ligarRuido() {
   }
 }
 function desligarRuido() {
-  ruido.ativo = false; ruido.nivel = null;
+  ruido.ativo = false; ruido.nivel = null; ruido.hist = [];
   ruido.stream?.getTracks().forEach(t => t.stop());
   ruido.stream = null;
   $("ruido-medidor").hidden = true;
@@ -181,6 +186,17 @@ function medirRuido(agora) {
   const db = 20 * Math.log10(Math.sqrt(s / ruido.dados.length) + 1e-8);      // ~-100 (silêncio) .. 0 (saturado)
   const nivel = Math.max(0, Math.min(100, Math.round((db + 60) / 60 * 100))); // -60 dB = 0, 0 dB = 100
   ruido.nivel = ruido.nivel == null ? nivel : Math.round(0.7 * ruido.nivel + 0.3 * nivel);
+  // grito / pico: usa o nível BRUTO (o suavizado esconde o salto)
+  ruido.hist.push({ t: agora, nivel });
+  while (ruido.hist.length && ruido.hist[0].t < agora - 3) ruido.hist.shift();
+  if (cfg.pico && agora - ruido.ultimoPico >= ENG.picoGapS) {
+    const p = detectarPico(ruido.hist, agora, { minimo: ENG.picoMin, salto: ENG.picoSalto });
+    if (p.pico) {
+      ruido.ultimoPico = agora; sessao.picos++;
+      const texto = `Pico de ruído na sala: grito ou barulho forte (nível ${p.nivel}, fundo ${p.base}).`;
+      if (!emitirAviso(texto)) { registrarLog(texto); sessao.avisos.push({ t: agora, texto }); }
+    }
+  }
   $("ruido-fill").style.width = ruido.nivel + "%";
   $("ruido-fill").className = ruido.nivel >= ENG.ruidoAlto ? "alto" : ruido.nivel <= ENG.ruidoBaixo ? "baixo" : "";
   $("ruido-val").textContent = ruido.nivel;
@@ -400,9 +416,17 @@ function atualizarTracksPessoas(cam, dets, agora) {
   cam.tracks = cam.tracks.filter(tr => agora - tr.visto <= 2.0); // folga pro rodízio de câmeras
 }
 function posicaoNaSala(cam, alvo) { return fileirasECadeiras(cam.tracks).get(alvo) || null; }
-function ondeFica(cam, tr) {
+/** Nome curto da pessoa/lugar: posto mapeado (se houver) > fileira/cadeira estimada > #id. */
+function nomeCurto(cam, tr) {
+  const p = cam.postoDe(tr);
+  if (p) return p.nome;
   const pos = posicaoNaSala(cam, tr);
-  const lugar = !pos ? "Alguém"
+  return pos ? (modo === "seguranca" ? `P${pos[1]}` : `F${pos[0]}·C${pos[1]}`) : `#${tr.id}`;
+}
+function ondeFica(cam, tr) {
+  const p = cam.postoDe(tr);
+  const pos = p ? null : posicaoNaSala(cam, tr);
+  const lugar = p ? p.nome : !pos ? "Alguém"
     : modo === "seguranca" ? `Posição ${pos[1]} da esquerda${pos[0] > 1 ? `, fila ${pos[0]}` : ""}`
     : `Fileira ${pos[0]}, cadeira ${pos[1]} contando da sua esquerda`;
   return cams.length > 1 ? `${cam.nome}: ${lugar}` : lugar;
@@ -413,6 +437,7 @@ function avaliar(cam, agora) {
   const T = segundosDoModo();
   const m = MODOS[modo];
   let bons = 0, ruins = 0;
+  const posicoes = m.usaAlerta ? fileirasECadeiras(cam.tracks.filter(t => valido(t) && !t.ghost)) : null;
   for (const tr of cam.tracks) {
     const dt = Math.min(agora - tr.ultimoTick, 1); tr.ultimoTick = agora;
     let flag = false, cand = 0, rotulo = "", motivo = "";
@@ -443,6 +468,7 @@ function avaliar(cam, agora) {
     tr.estado = flag ? "flag" : (cand > 1 && modo !== "postura" ? "warn" : "ok");
     tr.rotulo = rotulo;
     if (flag) ruins++; else bons++;
+    const pos = posicoes?.get(tr); if (pos) acumularHeat(cam.heat, pos, dt, flag); // mapa de calor da sessão
 
     if (flag && !tr.avisado && m.usaAlerta) {
       const tempoTxt = modo === "postura" ? `há mais de ${formataDur(T)}` : `há mais de ${Math.round(T)} segundos`;
@@ -458,6 +484,7 @@ function avaliar(cam, agora) {
 function avaliarSeguranca(cam, agora) {
   const T = segundosDoModo();
   let bons = 0, ruins = 0;
+  const posicoes = fileirasECadeiras(cam.tracks.filter(valido));
   for (const tr of cam.tracks) {
     const dt = Math.min(agora - tr.ultimoTick, 1); tr.ultimoTick = agora;
     const est = estadoEpi(tr.hist, cfg.epi);
@@ -468,6 +495,7 @@ function avaliarSeguranca(cam, agora) {
       continue;
     }
     tr.totalS += dt;
+    const pos = posicoes.get(tr); if (pos) acumularHeat(cam.heat, pos, dt, !est.conforme);
     if (est.conforme) {
       tr.semEpiDesde = null; tr.avisado = false; tr.estado = "ok"; tr.rotulo = "EPI OK"; bons++; continue;
     }
@@ -492,6 +520,17 @@ function desenhar(cam) {
   ctx.clearRect(0, 0, W, H);
   ctx.font = `${Math.max(14, W / 70)}px "IBM Plex Mono", monospace`;
   ctx.lineWidth = Math.max(2, W / 500);
+  // postos mapeados (retângulos finos com nome) + retângulo em desenho no modo de edição
+  if (cam.postos.length || cam.edicao) {
+    ctx.save(); ctx.lineWidth = Math.max(1, W / 900); ctx.strokeStyle = "rgba(62,224,255,.75)"; ctx.setLineDash([8, 6]);
+    for (const p of cam.postos) {
+      const [x, y, w, h] = p.box; ctx.strokeRect(x * W, y * H, w * W, h * H);
+      ctx.fillStyle = "rgba(7,12,18,.7)"; const tw = ctx.measureText(p.nome).width + 10;
+      ctx.fillRect(x * W, y * H, tw, Math.max(16, W / 60)); ctx.fillStyle = "#3ee0ff"; ctx.fillText(p.nome, x * W + 5, y * H + Math.max(12, W / 80));
+    }
+    if (cam.rascunho) { const [x1, y1, x2, y2] = cam.rascunho; ctx.setLineDash([]); ctx.strokeStyle = "#fff"; ctx.strokeRect(Math.min(x1, x2), Math.min(y1, y2), Math.abs(x2 - x1), Math.abs(y2 - y1)); }
+    ctx.restore();
+  }
   for (const tr of cam.tracks) {
     if (tr.ghost && modo !== "atencao" && modo !== "produtividade") continue;
     const suspeito = !valido(tr);
@@ -518,10 +557,58 @@ class Cam {
   constructor(spec) {
     this.deviceId = spec.deviceId || null;
     this.nome = spec.nome || `Câmera ${cams.length + 1}`;
-    this.tracks = []; this.proximoId = 1; this.tileCursor = 0;
+    this.tracks = []; this.proximoId = 1; this.tileCursor = 0; this.heat = new Map();
     this.rodando = false; this.stream = null; this.fps = 0; this.lastFaces = 0; this.res = ""; this.erro = null;
     this.bons = 0; this.ruins = 0;
+    this.edicao = false; this.rascunho = null; // mapa de postos
     this.montar();
+    this.carregarPostos();
+  }
+  chave() { return this.deviceId || `cam:${this.nome}`; }
+  carregarPostos() { this.postos = cfg.postos[this.chave()] || []; }
+  salvarPostos() { cfg.postos[this.chave()] = this.postos; salvarCfg(); this.renderPostosUi(); }
+  postoDe(tr) { return this.postos.length && this.video.videoWidth ? postoDe(tr.box, this.postos, this.video.videoWidth, this.video.videoHeight) : null; }
+  renderPostosUi() {
+    this.el.querySelector(".cell-postos").classList.toggle("ativo", this.edicao);
+    this.el.classList.toggle("editando", this.edicao);
+    this.el.querySelector(".cell-postos").textContent = this.edicao ? "pronto" : (this.postos.length ? `postos (${this.postos.length})` : "postos");
+    this.msgPostos.hidden = !this.edicao;
+    if (!this.rodando) desenhar(this);
+  }
+  pontoDoEvento(e) {
+    const r = this.canvas.getBoundingClientRect();
+    const W = this.video.videoWidth || this.canvas.width, H = this.video.videoHeight || this.canvas.height;
+    let x = (e.clientX - r.left) / r.width * W; const y = (e.clientY - r.top) / r.height * H;
+    if (cfg.espelho) x = W - x;
+    return [x, y];
+  }
+  ligarEdicaoPostos() {
+    const c = this.canvas;
+    c.addEventListener("pointerdown", (e) => {
+      if (!this.edicao || !this.video.videoWidth) return;
+      const [x, y] = this.pontoDoEvento(e);
+      this.rascunho = [x, y, x, y]; c.setPointerCapture(e.pointerId);
+    });
+    c.addEventListener("pointermove", (e) => {
+      if (!this.edicao || !this.rascunho) return;
+      const [x, y] = this.pontoDoEvento(e); this.rascunho[2] = x; this.rascunho[3] = y;
+      if (!this.rodando) desenhar(this);
+    });
+    c.addEventListener("pointerup", () => {
+      if (!this.edicao || !this.rascunho) return;
+      const [x1, y1, x2, y2] = this.rascunho; this.rascunho = null;
+      const W = this.video.videoWidth, H = this.video.videoHeight;
+      const box = normalizarRect(x1, y1, x2, y2, W, H);
+      if (!box) { // clique simples: em cima de um posto = remover
+        const alvo = postoDe([x1, y1, 0, 0], this.postos, W, H);
+        if (alvo && confirm(`Remover o posto "${alvo.nome}"?`)) { this.postos = this.postos.filter(p => p !== alvo); this.salvarPostos(); registrarLog(`${this.nome}: posto "${alvo.nome}" removido`); }
+        return;
+      }
+      const nome = (prompt("Nome deste posto/assento (ex.: Posto 3, Mesa da Ana):", `Posto ${this.postos.length + 1}`) || "").trim();
+      if (!nome) return;
+      this.postos = [...this.postos, { id: Math.random().toString(36).slice(2, 8), nome, box }];
+      this.salvarPostos(); registrarLog(`${this.nome}: posto "${nome}" mapeado`);
+    });
   }
   montar() {
     this.el = document.createElement("div");
@@ -531,21 +618,29 @@ class Cam {
         <input class="cell-nome" value="${esc(this.nome)}" title="Nome do ambiente (clique pra editar)">
         <select class="cell-dev" title="Qual câmera alimenta esta célula"><option value="">câmera padrão</option></select>
         <span class="cell-meta mono">—</span>
+        <button class="cell-postos" title="Mapear postos/assentos: arraste um retângulo sobre cada lugar e dê um nome">postos</button>
         <button class="cell-x" title="Remover câmera">×</button>
       </div>
-      <div class="cell-video"><video playsinline muted></video><canvas></canvas><div class="cell-msg" hidden></div></div>`;
+      <div class="cell-video"><video playsinline muted></video><canvas></canvas><div class="cell-msg" hidden></div>
+        <div class="cell-postos-msg" hidden>Arraste um retângulo sobre cada posto/assento e dê um nome. Clique num posto pra remover. <b>pronto</b> fecha.</div></div>`;
     this.video = this.el.querySelector("video");
     this.canvas = this.el.querySelector("canvas");
     this.ctx = this.canvas.getContext("2d");
     this.meta = this.el.querySelector(".cell-meta");
     this.msg = this.el.querySelector(".cell-msg");
+    this.msgPostos = this.el.querySelector(".cell-postos-msg");
     this.sel = this.el.querySelector(".cell-dev");
-    this.el.querySelector(".cell-nome").addEventListener("input", (e) => { this.nome = e.target.value.trim() || this.nome; salvarCfg(); });
+    this.el.querySelector(".cell-nome").addEventListener("input", (e) => { this.nome = e.target.value.trim() || this.nome; salvarCfg(); if (!this.deviceId) { this.carregarPostos(); this.renderPostosUi(); } });
     this.sel.addEventListener("change", async () => {
-      this.deviceId = this.sel.value || null; salvarCfg();
+      this.deviceId = this.sel.value || null; salvarCfg(); this.carregarPostos(); this.renderPostosUi();
       if (this.rodando) { this.parar(); await this.ligar(); }
     });
     this.el.querySelector(".cell-x").addEventListener("click", () => removerCam(this));
+    this.el.querySelector(".cell-postos").addEventListener("click", () => {
+      if (!this.rodando) { registrarLog(`${this.nome}: ligue as câmeras antes de mapear postos (precisa ver a imagem)`); return; }
+      this.edicao = !this.edicao; this.rascunho = null; this.renderPostosUi();
+    });
+    this.ligarEdicaoPostos();
     $("feeds").appendChild(this.el);
   }
   preencherDevices(devs) {
@@ -579,7 +674,7 @@ class Cam {
     }
   }
   parar() {
-    this.rodando = false;
+    this.rodando = false; this.edicao = false; this.rascunho = null; this.renderPostosUi();
     this.stream?.getTracks().forEach(t => t.stop());
     this.stream = null; this.video.srcObject = null;
     this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
@@ -672,8 +767,7 @@ function renderStats() {
     const linhas = cams.flatMap(cam => cam.tracks.filter(t => t.totalS > 10).map(t => ({ cam, t, pct: t.focoS / t.totalS })))
       .sort((a, b) => a.pct - b.pct).slice(0, 14);
     corpo.innerHTML = linhas.length ? linhas.map(({ cam, t, pct }) => {
-      const pos = posicaoNaSala(cam, t);
-      const nome = (cams.length > 1 ? esc(cam.nome) + " " : "") + (pos ? `F${pos[0]}·C${pos[1]}` : `#${t.id}`);
+      const nome = (cams.length > 1 ? esc(cam.nome) + " " : "") + esc(nomeCurto(cam, t));
       return `<div class="stat-linha ${pct < 0.6 ? "ruim" : ""}"><span>${nome}</span>
         <span class="barra"><i style="width:${Math.round(pct * 100)}%"></i></span><span>${Math.round(pct * 100)}%</span></div>`;
     }).join("") : `<p class="dica">acumulando… aparece após 10s de cada pessoa</p>`;
@@ -682,8 +776,7 @@ function renderStats() {
     const linhas = cams.flatMap(cam => cam.tracks.filter(t => t.totalS > 5).map(t => ({ cam, t, pct: 1 - t.semEpiS / t.totalS })))
       .sort((a, b) => a.pct - b.pct).slice(0, 14);
     corpo.innerHTML = linhas.length ? linhas.map(({ cam, t, pct }) => {
-      const pos = posicaoNaSala(cam, t);
-      const nome = (cams.length > 1 ? esc(cam.nome) + " " : "") + (pos ? `P${pos[1]}` : `#${t.id}`) + (t.faltando?.length ? ` · ${esc(rotuloEpi(t.faltando).toLowerCase())}` : "");
+      const nome = (cams.length > 1 ? esc(cam.nome) + " " : "") + esc(nomeCurto(cam, t)) + (t.faltando?.length ? ` · ${esc(rotuloEpi(t.faltando).toLowerCase())}` : "");
       return `<div class="stat-linha ${pct < 0.6 ? "ruim" : ""}"><span>${nome}</span>
         <span class="barra"><i style="width:${Math.round(pct * 100)}%"></i></span><span>${Math.round(pct * 100)}%</span></div>`;
     }).join("") : `<p class="dica">acumulando… aparece após 5s de cada pessoa</p>`;
@@ -693,22 +786,42 @@ function renderStats() {
     desenharCurva($("spark"), amostrasPresenca.map(a => a[1]), Math.max(picoPresenca, 1));
   } else painel.hidden = true;
 }
-function desenharCurva(c, valores, max, cor = "#3ee0ff") {
+function desenharCurva(c, valores, max, cor = "#3ee0ff", marcas = []) {
   if (!c) return;
   const w = c.width = c.clientWidth || 300, h = c.height = 64;
   const g = c.getContext("2d");
   g.clearRect(0, 0, w, h);
   if (valores.length < 2) return;
+  const xy = (i) => [(i / (valores.length - 1)) * (w - 4) + 2, h - 4 - (valores[i] / max) * (h - 10)];
   g.beginPath();
-  valores.forEach((n, i) => {
-    const x = (i / (valores.length - 1)) * (w - 4) + 2, y = h - 4 - (n / max) * (h - 10);
-    i ? g.lineTo(x, y) : g.moveTo(x, y);
-  });
+  valores.forEach((n, i) => { const [x, y] = xy(i); i ? g.lineTo(x, y) : g.moveTo(x, y); });
   g.strokeStyle = cor; g.lineWidth = 2; g.stroke();
+  for (const i of marcas) { // pontos de queda
+    if (i < 0 || i >= valores.length) continue;
+    const [x, y] = xy(i);
+    g.beginPath(); g.arc(x, y, 3.5, 0, Math.PI * 2); g.fillStyle = CORES.flag; g.fill();
+  }
+}
+function renderHeatmap() {
+  const el = $("heat");
+  const m = MODOS[modo];
+  if (!m.usaAlerta) { el.innerHTML = ""; return; }
+  const blocos = cams.map(cam => ({ cam, g: gradeHeatmap(cam.heat) })).filter(b => b.g.fileiras);
+  if (!blocos.length) { el.innerHTML = ""; return; }
+  const rot = modo === "seguranca" ? "sem EPI" : modo === "postura" ? "parado" : "disperso";
+  el.innerHTML = blocos.map(({ cam, g }) => `
+    <div class="heat-bloco">
+      <div class="heat-cam">${cams.length > 1 ? esc(cam.nome) + " · " : ""}onde o tempo ${rot} se concentra (fileira 1 = frente)</div>
+      <div class="heat" style="grid-template-columns: 22px repeat(${g.cadeiras}, 1fr)">
+        ${g.celulas.map((linha, fi) => `<div class="heat-f">F${fi + 1}</div>` + linha.map(c => c
+          ? `<div class="heat-c" style="background:hsl(${Math.round(120 - 120 * c.pct)},70%,${28 + Math.round(12 * c.pct)}%)" title="${Math.round(c.pct * 100)}% do tempo ${rot} (${formataDur(c.total)})">${Math.round(c.pct * 100)}%</div>`
+          : `<div class="heat-c vazia"></div>`).join("")).join("")}
+      </div>
+    </div>`).join("");
 }
 
 // ------------------------------------------------------------------ relatório da sessão
-function novaSessao() { return { inicio: agoraS(), inicioWall: Date.now(), passoS: 5, amostras: [], avisos: [] }; }
+function novaSessao() { return { inicio: agoraS(), inicioWall: Date.now(), passoS: 5, amostras: [], avisos: [], picos: 0 }; }
 const horaDe = (t) => new Date(sessao.inicioWall + (t - sessao.inicio) * 1000).toLocaleTimeString("pt-BR");
 function amostrarSessao(agora, bons, ruins) {
   const ult = sessao.amostras[sessao.amostras.length - 1];
@@ -723,15 +836,31 @@ function renderRelatorio(agora) {
     ["Duração", formataDur(r.duracaoS)],
     ["Pessoas (pico)", r.pico],
   ];
+  const quedas = m.taxa ? pontosDeQueda(sessao.amostras) : [];
   if (m.taxa) itens.push([m.taxa, pct], ["Nota", r.nota.rotulo, r.nota.cor]);
   else itens.push(["Média de pessoas", r.mediaPessoas.toFixed(1)]);
   if (m.usaAlerta) itens.push(["Minutos com alerta", r.minutosComAlerta.toFixed(1)], ["Avisos emitidos", r.avisos]);
-  if (r.ruidoMedio != null) itens.push(["Ruído médio", Math.round(r.ruidoMedio)]);
+  if (m.taxa) itens.push(["Quedas de atenção", quedas.length, quedas.length ? "warn" : ""]);
+  if (r.ruidoMedio != null) itens.push(["Ruído médio", Math.round(r.ruidoMedio)], ["Gritos / picos", sessao.picos, sessao.picos ? "warn" : ""]);
   $("rel-grid").innerHTML = itens.map(([k, v, cor]) =>
     `<div class="rel-item ${cor || ""}"><span class="rel-v">${esc(v)}</span><span class="rel-k">${esc(k)}</span></div>`).join("");
   const serie = sessao.amostras.map(a => a.ok + a.alerta ? 100 * a.ok / (a.ok + a.alerta) : (a.pessoas ? 100 : 0));
-  desenharCurva($("curva"), m.taxa ? serie : sessao.amostras.map(a => a.pessoas), m.taxa ? 100 : Math.max(r.pico, 1), "#34e08c");
+  desenharCurva($("curva"), m.taxa ? serie : sessao.amostras.map(a => a.pessoas), m.taxa ? 100 : Math.max(r.pico, 1), "#34e08c", quedas.map(q => q.i));
+  $("curva-legenda").hidden = !quedas.length;
+  renderHeatmap();
   $("btn-csv").disabled = !sessao.amostras.length;
+}
+// alerta coletivo: a sala inteira caiu (não é sobre uma pessoa) — 1 aviso por episódio
+let salaAvisada = false;
+function avaliarSala(agora) {
+  const m = MODOS[modo];
+  if (!m.taxa || !cfg.salaPct) return;
+  const s = alertaSala(sessao.amostras, agora, { limiar: cfg.salaPct, duracaoS: 30 });
+  if (s.ativo && !salaAvisada && totalPessoas() >= 2) {
+    const oque = modo === "atencao" ? "olhando pra frente" : modo === "exercicio" ? "no exercício" : modo === "seguranca" ? "com EPI" : "em dia";
+    if (emitirAviso(`Atenção: a sala caiu. Só ${Math.round(s.taxa)} por cento ${oque} há ${Math.round(agora - s.desde)} segundos.`)) salaAvisada = true;
+  }
+  if (salaAvisada && (!s.ativo && s.taxa != null && s.taxa >= cfg.salaPct + 10)) salaAvisada = false;
 }
 function baixarCsv() {
   const csv = csvRelatorio(sessao, modo, horaDe);
@@ -760,7 +889,7 @@ function loop() {
     renderContadores(bons, ruins);
     renderStats();
     amostrarSessao(agora, bons, ruins);
-    if (agora - ultimoRender >= 2) { ultimoRender = agora; renderRelatorio(agora); }
+    if (agora - ultimoRender >= 2) { ultimoRender = agora; renderRelatorio(agora); avaliarSala(agora); }
     if (modo === "presenca" && (!amostrasPresenca.length || agora - amostrasPresenca[amostrasPresenca.length - 1][0] >= 2)) {
       amostrasPresenca.push([agora, totalPessoas()]);
       if (amostrasPresenca.length > 900) amostrasPresenca.shift();
@@ -796,7 +925,7 @@ async function ligarTudo() {
       setPill("pill-camera", "on");
       $("pill-camera").lastChild.textContent = ok > 1 ? `${ok} CÂMERAS` : `CÂMERA ${cams[0].res}`;
       rodando = true; custoTick = []; amostrasPresenca = []; picoPresenca = 0;
-      sessao = novaSessao(); ultimoRender = 0;
+      sessao = novaSessao(); ultimoRender = 0; salaAvisada = false; cams.forEach(c => c.heat = new Map());
       if (cfg.ruido) await ligarRuido();
       loop();
       if (cfg.aviso === "voz") falar(`Radar ativo. Modo ${MODOS[modo].nome}${ok > 1 ? `, ${ok} câmeras` : ""}.`);
@@ -836,8 +965,11 @@ function aplicarUi() {
   $("inp-seg").value = T; $("lbl-seg").textContent = formataDur(T);
   $("inp-gap").value = cfg.gap; $("lbl-gap").textContent = cfg.gap + "s";
   $("inp-vol").value = cfg.volume; $("lbl-vol").textContent = cfg.volume + "%";
+  $("inp-sala").value = cfg.salaPct; $("lbl-sala").textContent = cfg.salaPct ? `abaixo de ${cfg.salaPct}%` : "desligado";
+  $("campo-sala").hidden = !MODOS[modo].taxa;
   $("chk-espelho").checked = cfg.espelho;
   $("chk-ruido").checked = cfg.ruido;
+  $("chk-pico").checked = cfg.pico; $("chk-pico").disabled = !cfg.ruido;
   $("feeds").classList.toggle("espelhado", cfg.espelho);
   document.querySelectorAll("#seg-aviso button").forEach(b => b.classList.toggle("ativo", b.dataset.v === cfg.aviso));
   document.querySelectorAll("#seg-alcance button").forEach(b => b.classList.toggle("ativo", b.dataset.v === cfg.alcance));
@@ -879,12 +1011,14 @@ $("seg-alcance").addEventListener("click", (ev) => {
 });
 $("inp-gap").addEventListener("input", () => { cfg.gap = Number($("inp-gap").value); $("lbl-gap").textContent = cfg.gap + "s"; salvarCfg(); });
 $("inp-vol").addEventListener("input", () => { cfg.volume = Number($("inp-vol").value); $("lbl-vol").textContent = cfg.volume + "%"; salvarCfg(); });
+$("inp-sala").addEventListener("input", () => { cfg.salaPct = Number($("inp-sala").value); $("lbl-sala").textContent = cfg.salaPct ? `abaixo de ${cfg.salaPct}%` : "desligado"; salaAvisada = false; salvarCfg(); });
 $("chk-espelho").addEventListener("change", () => { cfg.espelho = $("chk-espelho").checked; salvarCfg(); aplicarUi(); });
 $("chk-ruido").addEventListener("change", async () => {
-  cfg.ruido = $("chk-ruido").checked; salvarCfg();
+  cfg.ruido = $("chk-ruido").checked; salvarCfg(); $("chk-pico").disabled = !cfg.ruido;
   if (cfg.ruido && rodando) await ligarRuido();
   if (!cfg.ruido) desligarRuido();
 });
+$("chk-pico").addEventListener("change", () => { cfg.pico = $("chk-pico").checked; salvarCfg(); });
 $("btn-ligar").addEventListener("click", ligarTudo);
 $("btn-parar").addEventListener("click", pararTudo);
 $("btn-add-cam").addEventListener("click", () => adicionarCam({ nome: `Câmera ${cams.length + 1}` }));
@@ -915,6 +1049,9 @@ window.__radar = {
   trocarModo: (m) => { if (m in MODOS) entrarNoModo(m); },
   setSegundos: (n) => { cfg.segundos[modo] = Number(n); aplicarUi(); },
   setEpi: (o) => { Object.assign(cfg.epi, o); salvarCfg(); aplicarUi(); },
+  setPostos: (i, postos) => { const c = cams[i]; if (!c) return false; c.postos = postos; c.salvarPostos(); return true; },
+  getPostos: (i) => cams[i]?.postos ?? null,
+  nomes: (i) => (cams[i]?.tracks ?? []).map(t => nomeCurto(cams[i], t)),
 };
 
 // boot

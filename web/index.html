@@ -89,6 +89,11 @@
           <input type="range" id="inp-vol" min="0" max="100" step="5">
         </div>
       </div>
+      <div class="campo" id="campo-sala">
+        <label for="inp-sala">Alerta da sala inteira <span class="mono" id="lbl-sala"></span></label>
+        <input type="range" id="inp-sala" min="0" max="90" step="5">
+        <small class="dica">Avisa quando a taxa da sala fica abaixo disso por 30 s (0 = desligado). N&atilde;o &eacute; sobre uma pessoa: &eacute; a turma toda caindo.</small>
+      </div>
       <div class="campo">
         <label>Alcance da detec&ccedil;&atilde;o</label>
         <div class="segmentos" id="seg-alcance">
@@ -101,6 +106,7 @@
       <div class="campo">
         <label class="check"><input type="checkbox" id="chk-ruido"> Medir ru&iacute;do da sala <small>(usa o microfone; s&oacute; o n&iacute;vel, nada &eacute; gravado)</small></label>
         <div class="ruido" id="ruido-medidor" hidden><div class="ruido-bar"><i id="ruido-fill"></i></div><span class="mono" id="ruido-val">&mdash;</span></div>
+        <label class="check sub-check"><input type="checkbox" id="chk-pico"> Avisar em grito ou pico de barulho <small>(salto brusco sobre o fundo da sala)</small></label>
       </div>
       <div class="campo linha-fim">
         <label class="check"><input type="checkbox" id="chk-espelho"> Espelhar imagem <small>(s&oacute; visual)</small></label>
@@ -112,6 +118,8 @@
       <h2>Relat&oacute;rio da sess&atilde;o <button class="btn-limpar" id="btn-csv" disabled title="Baixa a planilha com a evolu&ccedil;&atilde;o e os avisos">baixar CSV</button></h2>
       <div class="rel-grid" id="rel-grid"></div>
       <canvas id="curva" class="curva"></canvas>
+      <small class="dica" id="curva-legenda" hidden><i class="ponto-queda"></i> ponto de queda: a taxa caiu 20 pontos ou mais em poucos segundos</small>
+      <div id="heat" class="heat-wrap"></div>
       <p class="dica">Come&ccedil;a a contar quando as c&acirc;meras ligam; ao parar, fica dispon&iacute;vel pra exportar.</p>
     </section>
 

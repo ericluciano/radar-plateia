@@ -117,8 +117,19 @@ h1 { margin: 0; font-size: 19px; letter-spacing: .22em; font-weight: 700; color:
 .feeds[data-n="2"], .feeds[data-n="3"], .feeds[data-n="4"] { grid-template-columns: repeat(2, 1fr); }
 .cell { background: #05080d; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; display: flex; flex-direction: column; }
 .cell-top {
-  display: grid; grid-template-columns: minmax(90px, 1fr) minmax(110px, 1.3fr) auto 28px; gap: 8px; align-items: center;
+  display: grid; grid-template-columns: minmax(90px, 1fr) minmax(110px, 1.3fr) auto auto 28px; gap: 8px; align-items: center;
   padding: 6px 8px; background: rgba(12, 20, 30, .9); border-bottom: 1px solid var(--line);
+}
+.cell-postos {
+  background: transparent; border: 1px solid var(--line); color: var(--dim); border-radius: 5px; height: 26px; padding: 0 8px;
+  cursor: pointer; font-family: var(--font-m); font-size: 10.5px; letter-spacing: .08em; white-space: nowrap;
+}
+.cell-postos:hover { color: var(--cyan); border-color: rgba(62, 224, 255, .5); }
+.cell-postos.ativo { background: rgba(62, 224, 255, .16); color: var(--cyan); border-color: var(--cyan); }
+.cell.editando canvas { cursor: crosshair; }
+.cell-postos-msg {
+  position: absolute; left: 8px; right: 8px; bottom: 8px; z-index: 3; padding: 7px 10px; border-radius: 6px;
+  background: rgba(7, 12, 18, .85); border: 1px solid rgba(62, 224, 255, .4); color: var(--txt); font-size: 12px; line-height: 1.4;
 }
 .cell-nome {
   background: transparent; border: 1px solid transparent; border-radius: 5px; color: var(--cyan);
@@ -198,6 +209,8 @@ h1 { margin: 0; font-size: 19px; letter-spacing: .22em; font-weight: 700; color:
 .campo.linha-fim { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
 .check { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--txt) !important; cursor: pointer; }
 .checks { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+.sub-check { margin-top: 8px; padding-left: 4px; }
+.check input:disabled + * , .check:has(input:disabled) { opacity: .55; }
 .checks .check { margin-bottom: 0; }
 .campo label.sub { margin-top: 8px; }
 .check small { color: var(--dim); }
@@ -248,6 +261,15 @@ select {
 .rel-item.warn .rel-v { color: var(--warn); }
 .rel-item.alerta .rel-v { color: var(--alert); }
 .btn-limpar:disabled { opacity: .4; cursor: default; }
+
+/* mapa de calor da sessão */
+.heat-wrap { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
+.heat-cam { font-size: 10px; letter-spacing: .14em; text-transform: uppercase; color: var(--dim); margin-bottom: 5px; }
+.heat { display: grid; gap: 3px; align-items: center; }
+.heat-f { font-family: var(--font-m); font-size: 10px; color: var(--dim); }
+.heat-c { height: 20px; border-radius: 3px; display: flex; align-items: center; justify-content: center; font-family: var(--font-m); font-size: 9.5px; color: rgba(255, 255, 255, .85); }
+.heat-c.vazia { background: rgba(120, 190, 255, .06); }
+.ponto-queda { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--alert); vertical-align: middle; margin-right: 3px; }
 
 /* ruído */
 .ruido { display: flex; align-items: center; gap: 10px; margin-top: 8px; }

@@ -12,6 +12,7 @@ Pré-requisitos: Python 3.12 com `playwright` (`pip install playwright && playwr
 2. `python test_web.py [URL]` — 1 câmera: motor inicia, rosto detectado, 5 modos trocam sem erro. Sem URL usa servidor local; com URL testa produção.
 3. `python test_multicam_fake.py [URL]` — 2 células na mesma câmera falsa: soma dos contadores, grade 2, renomear, remover.
 4. `python test_seguranca_fake.py [URL]` — modo Segurança: pessoa sem colete vira "Sem EPI" e gera aviso após T; pessoa com colete fica "Com EPI".
+4b. `python test_postos_fake.py [URL]` — postos/assentos: posto mapeado sobre a pessoa vira o nome dela no aviso e nas estatísticas; persiste no navegador.
 5. `python test_multicam_real.py` — Chrome VISÍVEL com as webcams reais (precisa de 2 câmeras plugadas). Tira screenshot em `saida/`.
 6. `python test_seguranca_real.py` — modo Segurança headless na webcam real (`RADAR_CAM_LABEL=BRIO` escolhe a câmera). Só prova que o
    detector de pessoas roda no hardware; o veredito de EPI depende de quem está na frente da câmera.

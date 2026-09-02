@@ -9,7 +9,8 @@ App de navegador (radar.ericluciano.com.br) que analisa a câmera 100% na máqui
 - v1 (01/09) app desktop Python com apito; v2 aviso por voz com fileira/cadeira; v3 app web publicado com 5 modos (Atenção, Exercício, Produtividade, Postura, Presença), aviso configurável, segundos por modo.
 - v3.1 alcance Perto/Médio/Longe (varredura por zonas); v3.2 resolução real da câmera; v3.3 multi-câmera (células nomeadas, contadores somados, aviso com nome da câmera, rodízio de processamento, filtro de rosto suspeito).
 - v3.4: motor separado (`engine.js`) com testes unitários, testes e2e no repositório, relatório de sessão com nota e exportação CSV, medidor de ruído da sala.
-- v3.5 (02/09, este ciclo): **modo Segurança (EPI)** — detector de pessoas (corpo) embarcado, leitura de colete alta-visibilidade e capacete por cor, EPI obrigatório configurável (colete/capacete) e rigor, aviso "posição X sem colete há mais de N segundos", contadores com/sem EPI, conformidade por pessoa e no relatório. Absorveu e encerrou o app separado Monitor de EPI. Correção de bug: o primeiro aviso ficava mudo nos 20 s iniciais da página (valia pra todos os modos).
+- v3.6 (02/09, loop autônomo pedido pelo Eric): **grito/pico de ruído** vira aviso (nível bruto salta 30+ sobre o fundo dos 2 s anteriores e passa de 80; barulho constante não dispara); **curva com pontos de queda** (bolinha vermelha onde a taxa caiu 20+ pontos) e contador "Quedas de atenção"; **alerta da sala inteira** (taxa abaixo de X% por 30 s, com 2+ pessoas; X ajustável, 0 desliga); **mapa de calor por fileira/cadeira** no relatório (% do tempo disperso/sem EPI por lugar, por câmera); **postos/assentos por câmera**: botão "postos" na célula, arrasta um retângulo sobre cada lugar e dá nome — o nome entra nos avisos ("Mesa da Ana: cabeça baixa há…"), nas estatísticas por pessoa e fica salvo no navegador por câmera.
+- v3.5 (02/09): **modo Segurança (EPI)** — detector de pessoas (corpo) embarcado, leitura de colete alta-visibilidade e capacete por cor, EPI obrigatório configurável (colete/capacete) e rigor, aviso "posição X sem colete há mais de N segundos", contadores com/sem EPI, conformidade por pessoa e no relatório. Absorveu e encerrou o app separado Monitor de EPI. Correção de bug: o primeiro aviso ficava mudo nos 20 s iniciais da página (valia pra todos os modos).
 
 ## O que o mercado oferece (pesquisa 02/09/2026)
 - Aulas/eventos: nota de engajamento 0-100 em tempo real, curva de atenção com pontos de queda, presença automática, relatório por sessão e por aluno (semana), alertas inteligentes ("atenção caiu", "quem está em risco"). Sinal considerado mais defensável: cabeça/olhar (comportamento observável), não emoção. Fontes: [Forasoft](https://www.forasoft.com/blog/article/ai-video-analytics-online-learning), [XenonStack](https://www.xenonstack.com/blog/computer-vision-for-monitoring-classroom-engagement), [ClassEngage AI](https://vizenta.ai/classengage-ai).
@@ -17,8 +18,8 @@ App de navegador (radar.ericluciano.com.br) que analisa a câmera 100% na máqui
 - Multi-câmera de prédio: não se constrói NVR — Frigate (open source, RTSP, detecção local) é a base natural (nota Brain 2ab6nhavyolr).
 
 ## Próximos passos SEM decisão pendente (ordem sugerida)
-1. Curva de atenção com pontos de queda marcados e "alerta inteligente" da sala (atenção média caiu abaixo de X% por Y segundos) — o dado já existe no relatório.
-2. Mapa de calor por fileira/cadeira ao fim da sessão (onde a dispersão se concentra).
+1. ~~Curva de atenção com pontos de queda + alerta da sala~~ — entregue na v3.6.
+2. ~~Mapa de calor por fileira/cadeira~~ — entregue na v3.6.
 3. Relatório em PDF/HTML imprimível além do CSV; histórico de sessões no navegador (IndexedDB) pra reabrir depois.
 4. Presença automática: contagem ao entrar/sair + hora do pico, exportável.
 5. Sons de aviso alternativos e aviso por voz em outros idiomas (Web Speech já suporta).
@@ -33,8 +34,8 @@ App de navegador (radar.ericluciano.com.br) que analisa a câmera 100% na máqui
 
 ## Próximas entregas (ordem sugerida, sem nova decisão)
 1. ~~Modo Segurança (EPI) v1~~ — entregue na v3.5 (leitura por cor).
-2. Identificação por posto/assento — mapa por câmera (arrastar caixas de posto sobre a imagem), nome nos avisos e no relatório de produtividade e de EPI.
-3. Alerta por grito/pico de ruído + heatmap por fileira + curva com pontos de queda.
+2. ~~Identificação por posto/assento~~ — entregue na v3.6 (mapa por câmera, nome nos avisos e estatísticas).
+3. ~~Alerta por grito/pico de ruído + heatmap por fileira + curva com pontos de queda~~ — entregue na v3.6.
 4. Reconhecimento facial com consentimento (cadastro de foto local, embeddings, LGPD por cliente).
 5. Publicar o repositório (repo-vitrine + MIT).
 6. Modo Segurança v2 — modelo TREINADO de EPI (capacete, colete, luva, óculos por detecção, não por cor), quando a leitura por cor não bastar num cliente real. Caminho compatível com o repo MIT: dataset público CC-BY (ex.: Construction Site Safety, Roboflow/Kaggle) + MediaPipe Model Maker (Apache 2.0) gerando `.tflite` pro mesmo `ObjectDetector` já embarcado. Pesos YOLO prontos (Ultralytics, keremberke) são AGPL e não entram. Exige conta no Roboflow ou Kaggle pra baixar o dataset (decisão/ação do Eric na hora) e algumas horas de GPU.
