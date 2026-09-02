@@ -1,7 +1,7 @@
 // Radar da Plateia — v3 web. Tudo roda NO NAVEGADOR: nenhuma imagem sai da máquina.
 import { FaceDetector, FilesetResolver } from "./vendor/tasks-vision/vision_bundle.mjs";
 
-const BUILD = "RADAR_V3_BUILD_20260901B";
+const BUILD = "RADAR_V3_BUILD_20260902C";
 
 // ------------------------------------------------------------------ modos
 const MODOS = {
@@ -523,7 +523,9 @@ async function ligarCamera() {
     $("feed-vazio").hidden = true;
     $("btn-fs").hidden = false;
     $("btn-parar").hidden = false;
-    setPill("pill-camera", "on");
+    const rw = video.videoWidth, rh = video.videoHeight;
+    $("pill-camera").innerHTML = `<i class="dot on"></i>CÂMERA ${rw}×${rh}`;
+    if (rh < 700) registrarLog(`atenção: a câmera entregou só ${rw}×${rh} — resolução baixa limita o alcance da detecção; câmera melhor (ou mais perto) ajuda muito`);
     rodando = true;
     reiniciarTracking();
     loop();
@@ -547,7 +549,7 @@ function pararCamera() {
   $("feed-vazio").hidden = false;
   $("feed-msg").innerHTML = "Câmera parada. Clique em <strong>Ligar câmera</strong> pra retomar.";
   $("btn-parar").hidden = true; $("btn-fs").hidden = true;
-  setPill("pill-camera", "off");
+  $("pill-camera").innerHTML = `<i class="dot off"></i>CÂMERA`;
   ctx.clearRect(0, 0, overlay.width, overlay.height);
 }
 async function listarCameras() {
