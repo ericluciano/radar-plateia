@@ -8,7 +8,8 @@ App de navegador (radar.ericluciano.com.br) que analisa a câmera 100% na máqui
 ## Entregue
 - v1 (01/09) app desktop Python com apito; v2 aviso por voz com fileira/cadeira; v3 app web publicado com 5 modos (Atenção, Exercício, Produtividade, Postura, Presença), aviso configurável, segundos por modo.
 - v3.1 alcance Perto/Médio/Longe (varredura por zonas); v3.2 resolução real da câmera; v3.3 multi-câmera (células nomeadas, contadores somados, aviso com nome da câmera, rodízio de processamento, filtro de rosto suspeito).
-- v3.4 (este ciclo): motor separado (`engine.js`) com testes unitários, testes e2e no repositório, relatório de sessão com nota e exportação CSV, medidor de ruído da sala.
+- v3.4: motor separado (`engine.js`) com testes unitários, testes e2e no repositório, relatório de sessão com nota e exportação CSV, medidor de ruído da sala.
+- v3.5 (02/09, este ciclo): **modo Segurança (EPI)** — detector de pessoas (corpo) embarcado, leitura de colete alta-visibilidade e capacete por cor, EPI obrigatório configurável (colete/capacete) e rigor, aviso "posição X sem colete há mais de N segundos", contadores com/sem EPI, conformidade por pessoa e no relatório. Absorveu e encerrou o app separado Monitor de EPI. Correção de bug: o primeiro aviso ficava mudo nos 20 s iniciais da página (valia pra todos os modos).
 
 ## O que o mercado oferece (pesquisa 02/09/2026)
 - Aulas/eventos: nota de engajamento 0-100 em tempo real, curva de atenção com pontos de queda, presença automática, relatório por sessão e por aluno (semana), alertas inteligentes ("atenção caiu", "quem está em risco"). Sinal considerado mais defensável: cabeça/olhar (comportamento observável), não emoção. Fontes: [Forasoft](https://www.forasoft.com/blog/article/ai-video-analytics-online-learning), [XenonStack](https://www.xenonstack.com/blog/computer-vision-for-monitoring-classroom-engagement), [ClassEngage AI](https://vizenta.ai/classengage-ai).
@@ -31,14 +32,16 @@ App de navegador (radar.ericluciano.com.br) que analisa a câmera 100% na máqui
 5. **Repositório público no padrão da casa:** GitHub público "para os alunos" (instala quem precisar), com instruções de instalação, após varredura de dados pessoais (skill repo-vitrine). Licença **MIT** (o único precedente explícito nos nossos repos é o clickup-mcp, MIT).
 
 ## Próximas entregas (ordem sugerida, sem nova decisão)
-1. Modo Segurança (EPI) — modelo, célula por câmera, aviso "posto X sem capacete", coluna no relatório.
-2. Identificação por posto/assento — mapa por câmera (arrastar caixas de posto sobre a imagem), nome nos avisos e no relatório de produtividade.
+1. ~~Modo Segurança (EPI) v1~~ — entregue na v3.5 (leitura por cor).
+2. Identificação por posto/assento — mapa por câmera (arrastar caixas de posto sobre a imagem), nome nos avisos e no relatório de produtividade e de EPI.
 3. Alerta por grito/pico de ruído + heatmap por fileira + curva com pontos de queda.
 4. Reconhecimento facial com consentimento (cadastro de foto local, embeddings, LGPD por cliente).
 5. Publicar o repositório (repo-vitrine + MIT).
+6. Modo Segurança v2 — modelo TREINADO de EPI (capacete, colete, luva, óculos por detecção, não por cor), quando a leitura por cor não bastar num cliente real. Caminho compatível com o repo MIT: dataset público CC-BY (ex.: Construction Site Safety, Roboflow/Kaggle) + MediaPipe Model Maker (Apache 2.0) gerando `.tflite` pro mesmo `ObjectDetector` já embarcado. Pesos YOLO prontos (Ultralytics, keremberke) são AGPL e não entram. Exige conta no Roboflow ou Kaggle pra baixar o dataset (decisão/ação do Eric na hora) e algumas horas de GPU.
 
 ## Limites conhecidos
 - Modelo de rosto embarcado é de curto alcance; o alcance Longe compensa por zonas mas depende de resolução e ângulo da câmera (a etiqueta CÂMERA mostra a resolução real).
 - Roda numa aba do navegador: fechou a aba, parou. Sessões longas (turno de fábrica) pedem a versão servidor.
-- Fileira/cadeira é estimativa geométrica.
+- Fileira/cadeira (e "posição N da esquerda" no modo Segurança) é estimativa geométrica.
 - Câmera IP não entra no navegador (só USB/UVC, placa de captura, câmera virtual).
+- Modo Segurança lê EPI por COR: colete de alta visibilidade é confiável; capacete é aproximado (cor forte ou branco no topo da cabeça) e por isso vem desligado por padrão. Luva e óculos não são detectáveis por cor — ficam pra v2 com modelo treinado.

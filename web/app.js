@@ -1,8 +1,11 @@
-// Radar da Plateia — v3.4 web (multi-câmera, relatório de sessão, ruído). Tudo roda NO NAVEGADOR.
-import { FaceDetector, FilesetResolver } from "./vendor/tasks-vision/vision_bundle.mjs";
-import { valido, dedupe, geometria, mediana, formataDur, zonas, fileirasECadeiras, resumoSessao, csvRelatorio } from "./engine.js";
+// Radar da Plateia — v3.5 web (multi-câmera, relatório de sessão, ruído, modo Segurança/EPI). Tudo roda NO NAVEGADOR.
+import { FaceDetector, ObjectDetector, FilesetResolver } from "./vendor/tasks-vision/vision_bundle.mjs";
+import {
+  valido, dedupe, geometria, mediana, formataDur, zonas, fileirasECadeiras, resumoSessao, csvRelatorio,
+  analisarCores, regioesEpi, amostraEpi, estadoEpi, rotuloEpi, fraseEpi, casarPorIou,
+} from "./engine.js";
 
-const BUILD = "RADAR_V3_BUILD_20260902E";
+const BUILD = "RADAR_V3_BUILD_20260902F";
 
 // ------------------------------------------------------------------ modos
 const MODOS = {
@@ -31,10 +34,16 @@ const MODOS = {
     desc: "Contagem de pessoas ao vivo: agora, pico e evolução da sala.",
     segundos: 10, contadores: [["neutro", "Agora"], ["ok", "Pico"], ["neutro", "Média"]], usaAlerta: false, taxa: null,
   },
+  seguranca: {
+    nome: "Segurança", icone: "▲",
+    desc: "Indústria/obra: detecta pessoas e avisa quem está sem colete ou capacete.",
+    segundos: 15, contadores: [["ok", "Com EPI"], ["alerta", "Sem EPI"], ["neutro", "Pessoas"]], usaAlerta: true, taxa: "Conformidade",
+    pessoas: true, // usa o detector de pessoas (corpo), não o de rostos
+  },
 };
 
 const ENG = {
-  conf: 0.28, minFacePx: 22, baselineS: 3, recoverS: 2,
+  conf: 0.28, minFacePx: 22, baselineS: 3, recoverS: 2, pessoaConf: 0.40,
   yawDev: 0.42, ghostStable: 5, ghostTtl: 16,
   pitchFrontalAbs: 0.35, moveFrac: 0.14,
   ruidoAlto: 70, ruidoBaixo: 15,
@@ -46,7 +55,8 @@ const cfg = carregarCfg();
 let modo = cfg.modo in MODOS ? cfg.modo : "atencao";
 let rodando = false;
 let detector = null;
-let ultimoAviso = 0;
+let detectorPessoas = null, carregandoPessoas = null;
+let ultimoAviso = -Infinity; // 0 travava o 1º aviso nos primeiros `gap` segundos após abrir a página (bug pego pelo e2e do modo Segurança)
 let custoTick = [];
 let amostrasPresenca = [];
 let picoPresenca = 0;
@@ -64,10 +74,11 @@ function carregarCfg() {
   const base = {
     modo: "atencao", aviso: "voz", gap: 20, volume: 70, espelho: false, alcance: "longe", ruido: false,
     segundos: {}, cams: [{ deviceId: null, nome: "Câmera 1" }],
+    epi: { colete: true, capacete: false, rigor: "normal" },
   };
   try {
     const s = JSON.parse(localStorage.getItem("radar.cfg.v1") || "{}");
-    const out = { ...base, ...s, segundos: { ...(s.segundos || {}) } };
+    const out = { ...base, ...s, segundos: { ...(s.segundos || {}) }, epi: { ...base.epi, ...(s.epi || {}) } };
     if (!Array.isArray(s.cams) || !s.cams.length) out.cams = [{ deviceId: s.camera || null, nome: "Câmera 1" }];
     return out;
   } catch { return base; }
@@ -229,6 +240,72 @@ function detectarTudo(cam) {
   return dedupe(saida);
 }
 
+// ------------------------------------------------------------------ detector de PESSOAS (modo Segurança) — carrega só quando o modo pede
+async function criarDetectorPessoas() {
+  const fileset = await FilesetResolver.forVisionTasks("vendor/tasks-vision/wasm");
+  for (const delegate of ["GPU", "CPU"]) {
+    try {
+      return await ObjectDetector.createFromOptions(fileset, {
+        baseOptions: { modelAssetPath: "vendor/models/efficientdet_lite0.tflite", delegate },
+        runningMode: "IMAGE", scoreThreshold: ENG.pessoaConf, maxResults: 24, categoryAllowlist: ["person"],
+      });
+    } catch (e) { erros.push(`detector pessoas ${delegate}: ${e.message}`); }
+  }
+  throw new Error("não consegui iniciar o detector de pessoas");
+}
+function garantirDetectorPessoas() {
+  if (detectorPessoas) return Promise.resolve();
+  if (carregandoPessoas) return carregandoPessoas;
+  setPill("pill-motor", "carregando");
+  carregandoPessoas = criarDetectorPessoas()
+    .then(d => { detectorPessoas = d; setPill("pill-motor", "on"); registrarLog("detector de pessoas pronto (modo Segurança)"); })
+    .catch(e => { erros.push("motor pessoas: " + e.message); registrarLog("falha no detector de pessoas: " + e.message); setPill("pill-motor", "erro"); })
+    .finally(() => { carregandoPessoas = null; });
+  return carregandoPessoas;
+}
+function detectarPessoasRegiao(cam, sx, sy, sw, sh, saida) {
+  const escala = Math.min(1, 640 / sw); // modelo usa 320px; 640 preserva pessoa pequena sem custo de cópia grande
+  const dw = Math.max(1, Math.round(sw * escala)), dh = Math.max(1, Math.round(sh * escala));
+  tileCanvas.width = dw; tileCanvas.height = dh;
+  tileCtx.drawImage(cam.video, sx, sy, sw, sh, 0, 0, dw, dh);
+  const res = detectorPessoas.detect(tileCanvas);
+  for (const d of res.detections) {
+    const bb = d.boundingBox;
+    saida.push({ box: [bb.originX / escala + sx, bb.originY / escala + sy, bb.width / escala, bb.height / escala], kps: [], score: d.categories?.[0]?.score ?? 0 });
+  }
+}
+function detectarPessoas(cam) {
+  const W = cam.video.videoWidth, H = cam.video.videoHeight;
+  const saida = [];
+  detectarPessoasRegiao(cam, 0, 0, W, H, saida);
+  if (cfg.alcance !== "perto") { // pessoa é grande: 2x2 basta, 1 zona por volta em rodízio
+    const zs = zonas(W, H, "medio");
+    const [sx, sy, sw, sh] = zs[cam.tileCursor % zs.length]; cam.tileCursor++;
+    detectarPessoasRegiao(cam, sx, sy, sw, sh, saida);
+  }
+  return dedupe(saida, "area"); // zona corta o corpo: a caixa inteira (maior) vence a parcial, mesmo com score menor
+}
+const amostraCanvas = document.createElement("canvas");
+const amostraCtx = amostraCanvas.getContext("2d", { willReadFrequently: true });
+/** Lê as cores do torso (colete) e do topo (capacete) de cada pessoa numa cópia reduzida do quadro. */
+function amostrarEpi(cam, dets) {
+  if (!dets.length) return;
+  const W = cam.video.videoWidth, H = cam.video.videoHeight;
+  const escala = Math.min(1, 640 / W);
+  const dw = Math.round(W * escala), dh = Math.round(H * escala);
+  amostraCanvas.width = dw; amostraCanvas.height = dh;
+  amostraCtx.drawImage(cam.video, 0, 0, dw, dh);
+  const pega = ([x, y, w, h]) => {
+    const gx = Math.max(0, Math.min(Math.round(x * escala), dw - 2)), gy = Math.max(0, Math.min(Math.round(y * escala), dh - 2));
+    const gw = Math.max(2, Math.min(Math.round(w * escala), dw - gx)), gh = Math.max(2, Math.min(Math.round(h * escala), dh - gy));
+    return analisarCores(amostraCtx.getImageData(gx, gy, gw, gh).data);
+  };
+  for (const d of dets) {
+    d.regioes = regioesEpi(d.box);
+    d.epi = amostraEpi({ torso: pega(d.regioes.colete), topo: pega(d.regioes.capacete) }, cfg.epi.rigor);
+  }
+}
+
 // ------------------------------------------------------------------ tracker (por câmera)
 function atualizarTracks(cam, dets, agora) {
   const W = cam.video.videoWidth, H = cam.video.videoHeight;
@@ -300,10 +377,29 @@ function atualizarTracks(cam, dets, agora) {
     return true;
   });
 }
+/** Tracker de pessoas (corpo inteiro): casa por sobreposição, guarda histórico de leituras de EPI. */
+function atualizarTracksPessoas(cam, dets, agora) {
+  const { pares, livres } = casarPorIou(cam.tracks, dets, 0.2);
+  for (const [tr, d] of pares) {
+    tr.box = d.box; tr.visto = agora; tr.regioes = d.regioes;
+    tr.score = 0.8 * tr.score + 0.2 * d.score;
+    tr.hist.push(d.epi); if (tr.hist.length > 8) tr.hist.shift();
+  }
+  for (const d of livres) {
+    cam.tracks.push({
+      id: cam.proximoId++, box: d.box, kps: [], score: d.score, inicio: agora, visto: agora,
+      hist: [d.epi], regioes: d.regioes, faltando: [], semEpiDesde: null, avisado: false,
+      ghost: false, sumido: 0, focoS: 0, totalS: 0, semEpiS: 0, ultimoTick: agora,
+    });
+  }
+  cam.tracks = cam.tracks.filter(tr => agora - tr.visto <= 2.0); // folga pro rodízio de câmeras
+}
 function posicaoNaSala(cam, alvo) { return fileirasECadeiras(cam.tracks).get(alvo) || null; }
 function ondeFica(cam, tr) {
   const pos = posicaoNaSala(cam, tr);
-  const lugar = pos ? `Fileira ${pos[0]}, cadeira ${pos[1]} contando da sua esquerda` : "Alguém";
+  const lugar = !pos ? "Alguém"
+    : modo === "seguranca" ? `Posição ${pos[1]} da esquerda${pos[0] > 1 ? `, fila ${pos[0]}` : ""}`
+    : `Fileira ${pos[0]}, cadeira ${pos[1]} contando da sua esquerda`;
   return cams.length > 1 ? `${cam.nome}: ${lugar}` : lugar;
 }
 
@@ -353,6 +449,31 @@ function avaliar(cam, agora) {
   }
   return { bons, ruins };
 }
+/** Modo Segurança: "Sem EPI" conta na hora (é o estado real); o AVISO espera T segundos (tolera passagem/oclusão). */
+function avaliarSeguranca(cam, agora) {
+  const T = segundosDoModo();
+  let bons = 0, ruins = 0;
+  for (const tr of cam.tracks) {
+    const dt = Math.min(agora - tr.ultimoTick, 1); tr.ultimoTick = agora;
+    const est = estadoEpi(tr.hist, cfg.epi);
+    tr.faltando = est.faltando;
+    if (est.conforme === null) { tr.estado = "calib"; tr.rotulo = "lendo…"; continue; }
+    tr.totalS += dt;
+    if (est.conforme) {
+      tr.semEpiDesde = null; tr.avisado = false; tr.estado = "ok"; tr.rotulo = "EPI OK"; bons++; continue;
+    }
+    tr.semEpiS += dt; ruins++;
+    tr.semEpiDesde ??= agora;
+    const s = agora - tr.semEpiDesde, flag = s >= T;
+    tr.estado = flag ? "flag" : "warn";
+    tr.rotulo = `${rotuloEpi(est.faltando)} ${Math.floor(s)}s`;
+    if (flag && !tr.avisado) {
+      const frase = `${ondeFica(cam, tr)}: sem ${fraseEpi(est.faltando)} há mais de ${Math.round(T)} segundos.`;
+      if (emitirAviso(frase)) tr.avisado = true;
+    }
+  }
+  return { bons, ruins };
+}
 
 // ------------------------------------------------------------------ desenho (por câmera)
 const CORES = { ok: "#34e08c", warn: "#ffc23e", flag: "#ff4d5e", ghost: "#ff9a3e", neutro: "#3ee0ff", calib: "#8aa0b4" };
@@ -374,6 +495,11 @@ function desenhar(cam) {
     ctx.setLineDash(suspeito ? [6, 6] : []);
     ctx.strokeRect(x, y, w, h);
     if (tr.rotulo && !suspeito) { ctx.fillStyle = cor; ctx.fillText(tr.rotulo, x, Math.max(16, y - 6)); }
+    if (modo === "seguranca" && tr.regioes && tr.faltando?.length) { // mostra ONDE procurou o EPI que falta
+      ctx.setLineDash([4, 4]); ctx.globalAlpha = 0.7;
+      for (const item of tr.faltando) { const [rx, ry, rw, rh] = tr.regioes[item]; ctx.strokeRect(rx, ry, rw, rh); }
+      ctx.globalAlpha = 1; ctx.setLineDash([]);
+    }
   }
   ctx.setLineDash([]);
 }
@@ -453,10 +579,19 @@ class Cam {
   tick(agora) {
     if (!this.rodando || this.video.readyState < 2 || !this.video.videoWidth) return { bons: 0, ruins: 0 };
     const t0 = performance.now();
-    const dets = detectarTudo(this);
-    this.lastFaces = dets.length;
-    atualizarTracks(this, dets, agora);
-    const r = avaliar(this, agora);
+    let dets, r;
+    if (MODOS[modo].pessoas) {
+      if (!detectorPessoas) { garantirDetectorPessoas(); return { bons: 0, ruins: 0 }; }
+      dets = detectarPessoas(this); amostrarEpi(this, dets);
+      this.lastFaces = dets.length;
+      atualizarTracksPessoas(this, dets, agora);
+      r = avaliarSeguranca(this, agora);
+    } else {
+      dets = detectarTudo(this);
+      this.lastFaces = dets.length;
+      atualizarTracks(this, dets, agora);
+      r = avaliar(this, agora);
+    }
     desenhar(this);
     const inst = 1000 / Math.max(performance.now() - t0, 1);
     this.fps = this.fps ? 0.9 * this.fps + 0.1 * inst : inst;
@@ -467,7 +602,8 @@ class Cam {
       : `${this.res} · ${r.bons} ${rotOk.toLowerCase()} · ${r.ruins} ${rotRuim.toLowerCase()}`;
     return r;
   }
-  pessoas() { return this.tracks.filter(t => !t.ghost && valido(t)).length; }
+  // no modo Segurança, pessoa só conta depois de 3 leituras (tira o pisca de detecção espúria do contador)
+  pessoas() { return this.tracks.filter(t => !t.ghost && valido(t) && (!MODOS[modo].pessoas || (t.hist?.length ?? 0) >= 3)).length; }
 }
 function atualizarGrade() { $("feeds").dataset.n = Math.min(cams.length, 4); }
 function adicionarCam(spec = {}) {
@@ -504,7 +640,8 @@ function renderContadores(bons, ruins) {
     const pcts = cams.flatMap(c => c.tracks).filter(t => t.totalS > 10).map(t => t.focoS / t.totalS);
     const medio = pcts.length ? Math.round(100 * pcts.reduce((s, p) => s + p, 0) / pcts.length) : 100;
     vals = [bons, ruins, medio + "%"];
-  } else vals = [bons, ruins];
+  } else if (modo === "seguranca") vals = [bons, ruins, totalPessoas()];
+  else vals = [bons, ruins];
   $("contadores").innerHTML = m.contadores.map(([cls, rot], i) =>
     `<div class="contador ${cls}"><div class="num">${vals[i] ?? 0}</div><div class="rot">${rot}</div></div>`).join("");
 }
@@ -520,6 +657,16 @@ function renderStats() {
       return `<div class="stat-linha ${pct < 0.6 ? "ruim" : ""}"><span>${nome}</span>
         <span class="barra"><i style="width:${Math.round(pct * 100)}%"></i></span><span>${Math.round(pct * 100)}%</span></div>`;
     }).join("") : `<p class="dica">acumulando… aparece após 10s de cada pessoa</p>`;
+  } else if (modo === "seguranca") {
+    painel.hidden = false; $("stats-titulo").textContent = "EPI por pessoa (% do tempo em conformidade)";
+    const linhas = cams.flatMap(cam => cam.tracks.filter(t => t.totalS > 5).map(t => ({ cam, t, pct: 1 - t.semEpiS / t.totalS })))
+      .sort((a, b) => a.pct - b.pct).slice(0, 14);
+    corpo.innerHTML = linhas.length ? linhas.map(({ cam, t, pct }) => {
+      const pos = posicaoNaSala(cam, t);
+      const nome = (cams.length > 1 ? esc(cam.nome) + " " : "") + (pos ? `P${pos[1]}` : `#${t.id}`) + (t.faltando?.length ? ` · ${esc(rotuloEpi(t.faltando).toLowerCase())}` : "");
+      return `<div class="stat-linha ${pct < 0.6 ? "ruim" : ""}"><span>${nome}</span>
+        <span class="barra"><i style="width:${Math.round(pct * 100)}%"></i></span><span>${Math.round(pct * 100)}%</span></div>`;
+    }).join("") : `<p class="dica">acumulando… aparece após 5s de cada pessoa</p>`;
   } else if (modo === "presenca") {
     painel.hidden = false; $("stats-titulo").textContent = cams.length > 1 ? "Evolução (todas as câmeras)" : "Evolução da sala";
     if (!$("spark")) corpo.innerHTML = `<canvas id="spark" class="curva"></canvas>`;
@@ -620,6 +767,7 @@ async function ligarTudo() {
   garantirAudio();
   try {
     if (!detector) { setPill("pill-motor", "carregando"); detector = await criarDetector(); setPill("pill-motor", "on"); }
+    if (MODOS[modo].pessoas) await garantirDetectorPessoas();
     let ok = 0;
     for (const cam of cams) if (await cam.ligar()) ok++;
     await listarCameras();
@@ -673,7 +821,14 @@ function aplicarUi() {
   $("feeds").classList.toggle("espelhado", cfg.espelho);
   document.querySelectorAll("#seg-aviso button").forEach(b => b.classList.toggle("ativo", b.dataset.v === cfg.aviso));
   document.querySelectorAll("#seg-alcance button").forEach(b => b.classList.toggle("ativo", b.dataset.v === cfg.alcance));
+  $("campo-epi").hidden = modo !== "seguranca";
+  $("chk-epi-colete").checked = !!cfg.epi.colete; $("chk-epi-capacete").checked = !!cfg.epi.capacete;
+  document.querySelectorAll("#seg-rigor button").forEach(b => b.classList.toggle("ativo", b.dataset.v === cfg.epi.rigor));
   renderContadores(0, 0); renderStats(); renderRelatorio(agoraS());
+}
+function entrarNoModo(m) {
+  modo = m; reiniciarTracking(); salvarCfg(); aplicarUi();
+  if (MODOS[modo].pessoas && !detectorPessoas) garantirDetectorPessoas();
 }
 function reiniciarTracking() {
   cams.forEach(c => { c.tracks = []; c.tileCursor = 0; });
@@ -682,8 +837,14 @@ function reiniciarTracking() {
 
 $("modos").addEventListener("click", (ev) => {
   const b = ev.target.closest(".modo"); if (!b) return;
-  modo = b.dataset.modo; reiniciarTracking(); salvarCfg(); aplicarUi();
+  entrarNoModo(b.dataset.modo);
   registrarLog(`modo trocado: ${MODOS[modo].nome} (regra ${formataDur(segundosDoModo())})`);
+});
+$("chk-epi-colete").addEventListener("change", () => { cfg.epi.colete = $("chk-epi-colete").checked; if (!cfg.epi.colete && !cfg.epi.capacete) { cfg.epi.colete = true; $("chk-epi-colete").checked = true; } salvarCfg(); });
+$("chk-epi-capacete").addEventListener("change", () => { cfg.epi.capacete = $("chk-epi-capacete").checked; salvarCfg(); });
+$("seg-rigor").addEventListener("click", (ev) => {
+  const b = ev.target.closest("button"); if (!b) return;
+  cfg.epi.rigor = b.dataset.v; salvarCfg(); aplicarUi();
 });
 $("inp-seg").addEventListener("input", () => { cfg.segundos[modo] = Number($("inp-seg").value); $("lbl-seg").textContent = formataDur(segundosDoModo()); salvarCfg(); });
 $("seg-aviso").addEventListener("click", (ev) => {
@@ -715,11 +876,13 @@ $("btn-limpar").addEventListener("click", () => { $("log").innerHTML = `<li clas
 window.__radar = {
   get estado() {
     return {
-      build: BUILD, rodando, modo, engineOk: !!detector, erros: [...erros],
-      sessao: { amostras: sessao.amostras.length, avisos: sessao.avisos.length },
+      build: BUILD, rodando, modo, engineOk: !!detector, pessoasOk: !!detectorPessoas, erros: [...erros],
+      sessao: { amostras: sessao.amostras.length, avisos: sessao.avisos.length, ultimoAviso: sessao.avisos[sessao.avisos.length - 1]?.texto ?? null },
       ruido: ruido.ativo ? ruido.nivel : null,
+      epi: { ...cfg.epi, segundos: segundosDoModo() },
       cams: cams.map(c => ({ nome: c.nome, rodando: c.rodando, res: c.res, lastFaces: c.lastFaces,
                              tracks: c.tracks.length, validos: c.tracks.filter(valido).length,
+                             pessoas: c.tracks.map(t => ({ id: t.id, estado: t.estado ?? null, faltando: t.faltando ?? null, hist: t.hist?.length ?? 0 })),
                              bons: c.bons, ruins: c.ruins, fps: Number(c.fps.toFixed(1)), erro: c.erro,
                              videoT: Number(c.video.currentTime.toFixed(1)), videoRs: c.video.readyState,
                              trackState: c.stream?.getVideoTracks()[0]?.readyState ?? null })),
@@ -729,7 +892,9 @@ window.__radar = {
   devices: async () => (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === "videoinput").map(d => ({ id: d.deviceId, label: d.label })),
   addCam: (deviceId = null, nome) => { adicionarCam({ deviceId, nome }); return cams.length; },
   setCamDevice: async (i, deviceId) => { const c = cams[i]; if (!c) return false; c.deviceId = deviceId; salvarCfg(); if (c.rodando) { c.parar(); await c.ligar(); } return true; },
-  trocarModo: (m) => { if (m in MODOS) { modo = m; reiniciarTracking(); aplicarUi(); } },
+  trocarModo: (m) => { if (m in MODOS) entrarNoModo(m); },
+  setSegundos: (n) => { cfg.segundos[modo] = Number(n); aplicarUi(); },
+  setEpi: (o) => { Object.assign(cfg.epi, o); salvarCfg(); aplicarUi(); },
 };
 
 // boot

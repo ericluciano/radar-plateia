@@ -4,14 +4,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Radar da Plateia</title>
-<meta name="description" content="Monitoramento de atenção da plateia pela webcam, 100% local no navegador. Modos: Atenção, Exercício, Produtividade, Postura e Presença.">
+<meta name="description" content="Monitoramento de pessoas pela câmera, 100% local no navegador. Modos: Atenção, Exercício, Produtividade, Postura, Presença e Segurança (EPI).">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='28' fill='%23070c12' stroke='%233ee0ff' stroke-width='4'/%3E%3Cpath d='M32 32 L32 8 A24 24 0 0 1 51 20 Z' fill='%233ee0ff' opacity='.85'/%3E%3Ccircle cx='32' cy='32' r='5' fill='%233ee0ff'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="styles.css">
 </head>
-<body data-build="RADAR_V3_BUILD_20260902E">
+<body data-build="RADAR_V3_BUILD_20260902F">
 
 <header class="topo">
   <div class="marca">
@@ -56,6 +56,20 @@
       <div class="campo">
         <label for="inp-seg">Segundos da regra <span class="mono" id="lbl-seg"></span></label>
         <input type="range" id="inp-seg" min="3" max="600" step="1">
+      </div>
+      <div class="campo" id="campo-epi" hidden>
+        <label>EPI obrigat&oacute;rio</label>
+        <div class="checks">
+          <label class="check"><input type="checkbox" id="chk-epi-colete"> Colete de alta visibilidade</label>
+          <label class="check"><input type="checkbox" id="chk-epi-capacete"> Capacete <small>(aproximado: cor forte ou branco no topo)</small></label>
+        </div>
+        <label class="sub">Rigor da leitura</label>
+        <div class="segmentos" id="seg-rigor">
+          <button data-v="tolerante">Tolerante</button>
+          <button data-v="normal">Normal</button>
+          <button data-v="rigoroso">Rigoroso</button>
+        </div>
+        <small class="dica">Leitura por cor no torso e no topo de cada pessoa detectada. Colete alta visibilidade &eacute; confi&aacute;vel; capacete &eacute; aproximado. As linhas tracejadas mostram onde o app procurou.</small>
       </div>
       <div class="campo">
         <label>Tipo de aviso</label>

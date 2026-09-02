@@ -19,9 +19,14 @@ export function contencao(a, b) {
   return inter / (a[2] * a[3]);
 }
 
-/** Remove detecções duplicadas: sobreposição alta OU caixa quase toda contida em outra (mesmo rosto). */
-export function dedupe(dets) {
-  const ordem = [...dets].sort((a, b) => b.score - a.score);
+/**
+ * Remove detecções duplicadas: sobreposição alta OU caixa quase toda contida em outra (mesmo rosto/pessoa).
+ * criterio "score" (rostos) fica com a mais confiante; "area" (pessoas) fica com a MAIOR — o recorte por zona
+ * corta o corpo e a caixa parcial (sem cabeça) costuma ter score maior que a inteira.
+ */
+export function dedupe(dets, criterio = "score") {
+  const area = (d) => d.box[2] * d.box[3];
+  const ordem = [...dets].sort(criterio === "area" ? (a, b) => area(b) - area(a) : (a, b) => b.score - a.score);
   const unicos = [];
   for (const d of ordem) {
     const dup = unicos.some(u => iou(d.box, u.box) >= 0.35 || contencao(d.box, u.box) > 0.7);
@@ -121,4 +126,93 @@ export function csvRelatorio(sessao, modo, fmtHora = (t) => String(t)) {
     linhas.push([fmtHora(v.t), "aviso", modo, "", "", "", "", "", v.texto].map(esc).join(sep));
   }
   return "﻿" + linhas.join("\r\n") + "\r\n";
+}
+
+// ------------------------------------------------------------------ Modo Segurança: EPI por cor (herdado do Monitor de EPI, 08/2026)
+
+/** Limiares por rigor: fração mínima de pixels da região que precisa "parecer" o EPI. */
+export const RIGOR_EPI = {
+  tolerante: { colete: 0.07, capaceteCor: 0.14, capaceteBranco: 0.28 },
+  normal:    { colete: 0.10, capaceteCor: 0.18, capaceteBranco: 0.34 },
+  rigoroso:  { colete: 0.15, capaceteCor: 0.25, capaceteBranco: 0.42 },
+};
+
+/** RGB 0-255 -> [matiz 0-360, saturação 0-1, valor 0-1]. */
+export function rgb2hsv(r, g, b) {
+  r /= 255; g /= 255; b /= 255;
+  const mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn;
+  let h = 0;
+  if (d > 0) {
+    if (mx === r) h = ((g - b) / d) % 6; else if (mx === g) h = (b - r) / d + 2; else h = (r - g) / d + 4;
+    h *= 60; if (h < 0) h += 360;
+  }
+  return [h, mx === 0 ? 0 : d / mx, mx];
+}
+
+/** Pixel de alta visibilidade: amarelo-verde fluorescente (matiz 40-100) ou laranja (10-40), ambos saturados e claros. */
+export const altaVisibilidade = (h, s, v) =>
+  (h >= 40 && h <= 100 && s >= 0.45 && v >= 0.45) || (h >= 10 && h < 40 && s >= 0.55 && v >= 0.45);
+
+/** Frações de cor numa região RGBA (Uint8ClampedArray). `passo` = amostra 1 a cada N pixels. */
+export function analisarCores(data, passo = 2) {
+  let n = 0, colete = 0, capaceteCor = 0, capaceteBranco = 0;
+  for (let i = 0; i + 2 < data.length; i += 4 * passo) {
+    const [h, s, v] = rgb2hsv(data[i], data[i + 1], data[i + 2]);
+    n++;
+    if (altaVisibilidade(h, s, v)) colete++;
+    if (s >= 0.45 && v >= 0.40) capaceteCor++;
+    if (v >= 0.80 && s <= 0.20) capaceteBranco++;
+  }
+  return { n, colete: n ? colete / n : 0, capaceteCor: n ? capaceteCor / n : 0, capaceteBranco: n ? capaceteBranco / n : 0 };
+}
+
+/**
+ * Onde procurar cada EPI dentro da caixa da pessoa. Caixa alta e estreita (h/w >= 2) = corpo inteiro em pé,
+ * torso fica mais no alto; caixa mais quadrada = meio corpo (câmera de mesa/parede perto).
+ */
+export function regioesEpi([x, y, w, h]) {
+  const inteiro = h / w >= 2;
+  return inteiro
+    ? { colete: [x + 0.18 * w, y + 0.14 * h, 0.64 * w, 0.24 * h], capacete: [x + 0.28 * w, y, 0.44 * w, 0.11 * h] }
+    : { colete: [x + 0.18 * w, y + 0.28 * h, 0.64 * w, 0.34 * h], capacete: [x + 0.28 * w, y + 0.01 * h, 0.44 * w, 0.19 * h] };
+}
+
+/** Uma amostra (um quadro): frações do torso e do topo viram tem/não tem por item, segundo o rigor. */
+export function amostraEpi({ torso, topo }, rigor = "normal") {
+  const R = RIGOR_EPI[rigor] || RIGOR_EPI.normal;
+  return {
+    colete: torso.colete >= R.colete,
+    capacete: topo.capaceteCor >= R.capaceteCor || topo.capaceteBranco >= R.capaceteBranco,
+  };
+}
+
+/**
+ * Estado suavizado da pessoa: item "tem" se >= 2 das últimas 6 amostras disseram tem (a leitura por cor falha
+ * em quadro isolado). Menos de 3 amostras = ainda lendo (conforme null). `obrigatorios` = {colete, capacete}.
+ */
+export function estadoEpi(hist, obrigatorios) {
+  const rec = hist.slice(-6);
+  if (rec.length < 3) return { conforme: null, faltando: [] };
+  const faltando = [];
+  for (const item of ["colete", "capacete"]) {
+    if (!obrigatorios?.[item]) continue;
+    if (rec.filter(a => a && a[item]).length < 2) faltando.push(item);
+  }
+  return { conforme: faltando.length === 0, faltando };
+}
+
+export const rotuloEpi = (faltando) => faltando.length ? "SEM " + faltando.map(f => f.toUpperCase()).join(" E ") : "";
+export const fraseEpi = (faltando) => faltando.join(" e ");
+
+/** Casa tracks com detecções pelo maior IoU (greedy). Devolve os pares e as detecções que sobraram. */
+export function casarPorIou(tracks, dets, minIou = 0.25) {
+  const cand = [];
+  for (const t of tracks) for (const d of dets) { const v = iou(t.box, d.box); if (v >= minIou) cand.push([v, t, d]); }
+  cand.sort((a, b) => b[0] - a[0]);
+  const usadosT = new Set(), usadosD = new Set(), pares = [];
+  for (const [, t, d] of cand) {
+    if (usadosT.has(t) || usadosD.has(d)) continue;
+    usadosT.add(t); usadosD.add(d); pares.push([t, d]);
+  }
+  return { pares, livres: dets.filter(d => !usadosD.has(d)) };
 }

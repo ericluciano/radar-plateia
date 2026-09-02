@@ -13,7 +13,9 @@ caixa verde = atento, vermelha/laranja = disperso. Ao abrir, fala "radar de voz 
 Avisos ficam registrados em `logs/eventos.log`. Detalhes tecnicos: `CLAUDE.md`.
 
 ## Versao web (a que vale hoje): radar.ericluciano.com.br
-Codigo em `web/`: app de navegador com 5 modos (Atencao, Exercicio, Produtividade, Postura, Presenca), varias cameras
-na mesma tela, aviso por voz/apito, relatorio de sessao com CSV e medidor de ruido. Nada sai da maquina.
+Codigo em `web/`: app de navegador com 6 modos (Atencao, Exercicio, Produtividade, Postura, Presenca e Seguranca/EPI),
+varias cameras na mesma tela, aviso por voz/apito, relatorio de sessao com CSV e medidor de ruido. Nada sai da maquina.
+- Modo Seguranca: detecta pessoas e avisa quem esta sem colete de alta visibilidade (e, opcionalmente, capacete) ha mais de
+  X segundos. Leitura por cor no torso/topo de cada pessoa; capacete e aproximado. Modelos MediaPipe embarcados (Apache 2.0).
 - Testes unitarios: `cd web && npm test` | E2E: `python web/tests/e2e/run_all.py` (ver `web/tests/e2e/README.md`)
 - Roteiro, decisoes tomadas e proximas entregas: `docs/ROADMAP.md`
