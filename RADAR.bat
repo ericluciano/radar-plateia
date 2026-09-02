@@ -1,13 +1,14 @@
 @echo off
 title Radar da Plateia
-cd /d C:\repos\radar-plateia
+cd /d "%~dp0"
 
-set "PY=C:\Users\Eric Luciano\AppData\Local\Programs\Python\Python312\python.exe"
-if not exist "%PY%" set "PY=python"
+rem Python 3.12 (mediapipe nao roda no 3.13+). Tenta o launcher "py", depois o python do PATH.
+set "PY=py -3.12"
+py -3.12 -c "import sys" >nul 2>&1 || set "PY=python"
 
 if not exist ".venv\Scripts\python.exe" (
     echo Primeira vez nesta maquina: instalando dependencias...
-    "%PY%" -m venv .venv
+    %PY% -m venv .venv
     ".venv\Scripts\python.exe" -m pip install --quiet --disable-pip-version-check -r requirements.txt
 )
 

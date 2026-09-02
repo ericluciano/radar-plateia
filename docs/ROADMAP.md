@@ -16,7 +16,7 @@ App de navegador (radar.ericluciano.com.br) que analisa a câmera 100% na máqui
 ## O que o mercado oferece (pesquisa 02/09/2026)
 - Aulas/eventos: nota de engajamento 0-100 em tempo real, curva de atenção com pontos de queda, presença automática, relatório por sessão e por aluno (semana), alertas inteligentes ("atenção caiu", "quem está em risco"). Sinal considerado mais defensável: cabeça/olhar (comportamento observável), não emoção. Fontes: [Forasoft](https://www.forasoft.com/blog/article/ai-video-analytics-online-learning), [XenonStack](https://www.xenonstack.com/blog/computer-vision-for-monitoring-classroom-engagement), [ClassEngage AI](https://vizenta.ai/classengage-ai).
 - Indústria/serviços: detecção de EPI (capacete, colete, luva, óculos) por pessoa com modelos YOLO em câmeras comuns e processamento local; painéis por período; câmeras IP. Fontes: [Ultralytics](https://www.ultralytics.com/blog/computer-vision-workplace-safety-ppe), [viAct](https://www.viact.ai/ppedetection), [Visionify](https://visionify.ai/ppe-compliance).
-- Multi-câmera de prédio: não se constrói NVR — Frigate (open source, RTSP, detecção local) é a base natural (nota Brain 2ab6nhavyolr).
+- Multi-câmera de prédio: não se constrói NVR — Frigate (open source, RTSP, detecção local) é a base natural.
 
 ## Próximos passos SEM decisão pendente (ordem sugerida)
 1. ~~Curva de atenção com pontos de queda + alerta da sala~~ — entregue na v3.6.

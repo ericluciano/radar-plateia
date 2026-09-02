@@ -8,7 +8,7 @@ import {
 } from "./engine.js";
 import { salvarSessao, listarSessoes, apagarSessao } from "./historico.js";
 
-const BUILD = "RADAR_V3_BUILD_20260902F";
+const BUILD = "RADAR_V3_BUILD_20260902G";
 
 // ------------------------------------------------------------------ modos
 const MODOS = {
@@ -415,7 +415,11 @@ async function cadastrarRosto(idx, nome, pessoaId = null) {
   if (!facialLigado()) return { ok: false, motivo: "ligue o reconhecimento e confirme o consentimento" };
   if (!(await garantirFaceApi())) return { ok: false, motivo: "modelo não carregou: " + recon.erro };
   const agora = agoraS(); // só rostos estáveis (>= 1,5 s na tela): detecção espúria de 1 quadro não conta como "outra pessoa"
-  const rostos = cam.tracks.filter(t => valido(t) && !t.ghost && rostoDoTrack(t) && agora - t.inicio >= 1.5);
+  const estaveis = cam.tracks.filter(t => valido(t) && !t.ghost && rostoDoTrack(t) && agora - t.inicio >= 1.5)
+    .sort((a, b) => b.box[2] - a.box[2]);
+  // quem cadastra está perto da câmera = o MAIOR rosto. Outro rosto só conta como "outra pessoa" se for comparável
+  // (>= 60% da largura E >= 80% do score): falso rosto em estampa/textura (menor e menos confiante) não bloqueia o cadastro.
+  const rostos = estaveis.filter((t, i) => i === 0 || (t.box[2] >= 0.6 * estaveis[0].box[2] && t.score >= 0.8 * estaveis[0].score));
   if (rostos.length !== 1) return { ok: false, motivo: rostos.length ? `há ${rostos.length} rostos na câmera — precisa estar sozinho` : "nenhum rosto estável na câmera (espere 2 s de frente pra ela)" };
   if (!pessoaId && !nome) return { ok: false, motivo: "dê um nome" };
   const desc = await assinaturaDoRosto(cam, rostoDoTrack(rostos[0]));
@@ -1259,7 +1263,8 @@ window.__radar = {
       facial: { ligado: facialLigado(), pronto: recon.pronto, erro: recon.erro, pessoas: recon.pessoas.map(p => ({ nome: p.nome, amostras: p.descs.length })) },
       cams: cams.map(c => ({ nome: c.nome, rodando: c.rodando, res: c.res, lastFaces: c.lastFaces,
                              tracks: c.tracks.length, validos: c.tracks.filter(valido).length,
-                             pessoas: c.tracks.map(t => ({ id: t.id, estado: t.estado ?? null, faltando: t.faltando ?? null, hist: t.hist?.length ?? 0, ancora: t.ancora ?? null, pessoa: t.pessoa ?? null, votos: t.votos ?? [] })),
+                             pessoas: c.tracks.map(t => ({ id: t.id, estado: t.estado ?? null, faltando: t.faltando ?? null, hist: t.hist?.length ?? 0, ancora: t.ancora ?? null, pessoa: t.pessoa ?? null, votos: t.votos ?? [],
+                                                            box: t.box.map(v => Math.round(v)), score: +t.score.toFixed(2), ghost: !!t.ghost, idadeS: +(agoraS() - t.inicio).toFixed(1) })),
                              bons: c.bons, ruins: c.ruins, fps: Number(c.fps.toFixed(1)), erro: c.erro,
                              videoT: Number(c.video.currentTime.toFixed(1)), videoRs: c.video.readyState,
                              trackState: c.stream?.getVideoTracks()[0]?.readyState ?? null })),

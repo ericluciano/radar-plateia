@@ -1,11 +1,13 @@
 # Gera os videos de camera falsa (y4m) a partir de uma foto com rosto. Saida em C:/tmp (nao versionar).
 import os, subprocess, sys
 
-FOTO = os.environ.get("RADAR_FACE_IMG", r"C:\repos\automacoes-inteligentes-site\src\img\eric-foto.png")
+# Foto de UMA pessoa (retrato, rosto de frente). Nao versionada: aponte RADAR_FACE_IMG ou salve em tests/e2e/fixtures/rosto.png
+AQUI = os.path.dirname(os.path.abspath(__file__))
+FOTO = os.environ.get("RADAR_FACE_IMG", os.path.join(AQUI, "fixtures", "rosto.png"))
 OUT_DIR = r"C:\tmp"
 os.makedirs(OUT_DIR, exist_ok=True)
 if not os.path.exists(FOTO):
-    print(f"foto nao encontrada: {FOTO} — defina RADAR_FACE_IMG"); sys.exit(1)
+    print(f"foto nao encontrada: {FOTO} — defina RADAR_FACE_IMG (retrato de uma pessoa) ou salve tests/e2e/fixtures/rosto.png"); sys.exit(1)
 
 # Variante com COLETE de alta visibilidade pintado no torso (modo Seguranca): painel amarelo fluorescente + 2 faixas refletivas.
 COLETE_PNG = os.path.join(OUT_DIR, "radar-fake-colete.png")

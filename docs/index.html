@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Radar da Plateia — como funciona</title>
+<meta name="description" content="App de navegador que lê a câmera 100% na máquina de quem usa e transforma isso em contadores, avisos por voz e relatório: atenção da plateia, exercício, produtividade, postura, presença e segurança (EPI).">
+<style>
+  :root{
+    --bg: #0b0f14; --bg-raised: #10161d; --bg-card: #131a22; --line: #212b36; --line-soft: #1a232c;
+    --ink: #e7edf3; --ink-dim: #a7b3bf; --ink-faint: #6b7885; --accent: #6ee7c4; --accent-dim: #3fae8c; --warn: #f2b866;
+    --radius: 14px; --maxw: 1080px;
+    --font: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, Roboto, Helvetica, Arial, sans-serif;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  }
+  *{ box-sizing: border-box; margin: 0; }
+  body{ background: var(--bg); color: var(--ink); font-family: var(--font); line-height: 1.6; }
+  .wrap{ max-width: var(--maxw); margin: 0 auto; padding: 0 24px; }
+  a{ color: var(--accent); text-decoration: none; }
+  a:hover{ text-decoration: underline; }
+  code, .mono{ font-family: var(--mono); }
+  header{ padding: 72px 0 48px; border-bottom: 1px solid var(--line-soft); }
+  .kicker{ font-family: var(--mono); font-size: .82rem; color: var(--accent); letter-spacing: .08em; text-transform: uppercase; }
+  h1{ font-size: clamp(1.8rem, 4vw, 2.6rem); margin: 10px 0 14px; }
+  .lead{ color: var(--ink-dim); font-size: 1.08rem; max-width: 46rem; }
+  .cta{ margin-top: 22px; display: flex; gap: 12px; flex-wrap: wrap; }
+  .btn{ display: inline-block; padding: 10px 16px; border-radius: 10px; border: 1px solid var(--accent-dim); color: var(--accent); font-weight: 600; }
+  .btn.solid{ background: var(--accent); color: #062018; }
+  .btn:hover{ text-decoration: none; filter: brightness(1.08); }
+  section{ padding: 56px 0; border-bottom: 1px solid var(--line-soft); }
+  h2{ font-size: 1.4rem; margin-bottom: 22px; }
+  h2 .num{ color: var(--accent); font-family: var(--mono); margin-right: 8px; }
+  .flow{ display: flex; flex-direction: column; gap: 14px; }
+  .step{ display: flex; gap: 16px; background: var(--bg-card); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px 20px; }
+  .step-n{ flex: none; width: 34px; height: 34px; border-radius: 50%; background: var(--bg-raised); border: 1px solid var(--accent-dim); color: var(--accent); display: flex; align-items: center; justify-content: center; font-family: var(--mono); font-size: .9rem; }
+  .step h3{ font-size: 1rem; margin-bottom: 4px; }
+  .step p{ color: var(--ink-dim); font-size: .95rem; }
+  .grid{ display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; }
+  .card{ background: var(--bg-card); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px 20px; }
+  .card h3{ font-size: 1rem; margin-bottom: 6px; }
+  .card p{ color: var(--ink-dim); font-size: .93rem; }
+  .card .tag{ display: inline-block; font-family: var(--mono); font-size: .72rem; color: var(--accent); border: 1px solid var(--accent-dim); border-radius: 999px; padding: 1px 8px; margin-bottom: 8px; }
+  .pills{ display: flex; flex-wrap: wrap; gap: 10px; }
+  .pill{ padding: 5px 11px; border-radius: 999px; font-family: var(--mono); font-size: .82rem; background: var(--bg-raised); border: 1px solid var(--line); color: var(--ink-dim); }
+  .diagram{ display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; align-items: stretch; margin-bottom: 26px; }
+  .node{ background: var(--bg-raised); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; position: relative; }
+  .node b{ display: block; font-size: .92rem; }
+  .node span{ color: var(--ink-dim); font-size: .82rem; }
+  .node::after{ content: "→"; position: absolute; right: -14px; top: 50%; transform: translateY(-50%); color: var(--accent-dim); font-size: 1.1rem; }
+  .node:last-child::after{ content: ""; }
+  .priv{ border-left: 3px solid var(--accent-dim); padding: 6px 16px; color: var(--ink-dim); }
+  .priv strong{ color: var(--ink); }
+  pre{ background: var(--bg-raised); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; overflow-x: auto; font-size: .86rem; color: var(--ink-dim); }
+  footer{ padding: 48px 0 64px; }
+  .footer-grid{ display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 18px; }
+  .footer-note{ color: var(--ink-faint); font-size: .85rem; }
+  @media (max-width: 640px){ .node::after{ content: ""; } header{ padding: 48px 0 36px; } }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap">
+    <div class="kicker">Expert Integrado · Mentoria Automações Inteligentes</div>
+    <h1>Radar da Plateia</h1>
+    <p class="lead">Um app de navegador que lê a câmera <strong>dentro do próprio computador</strong> e transforma isso em contadores, avisos por voz e relatório: quem está sem olhar pra frente numa aula, quem saiu do exercício, quanto foco há num escritório, quantas pessoas estão na sala e quem está sem colete numa fábrica. Nenhuma imagem sai da máquina.</p>
+    <div class="cta">
+      <a class="btn solid" href="https://radar.ericluciano.com.br">Abrir o app</a>
+      <a class="btn" href="https://github.com/ericlucianoferreira/radar-plateia">Código no GitHub</a>
+    </div>
+  </div>
+</header>
+
+<section>
+  <div class="wrap">
+    <h2><span class="num">01</span>Como funciona</h2>
+    <div class="diagram">
+      <div class="node"><b>Câmera</b><span>webcam, USB ou câmera virtual; várias ao mesmo tempo</span></div>
+      <div class="node"><b>Detecção local</b><span>rostos ou pessoas, no navegador (WASM/GPU)</span></div>
+      <div class="node"><b>Regra do modo</b><span>tempo sem olhar, sem EPI, parado, contagem…</span></div>
+      <div class="node"><b>Aviso</b><span>voz, apito ou silencioso, com posição ou nome</span></div>
+      <div class="node"><b>Relatório</b><span>curva, mapa de calor, CSV, PDF, histórico</span></div>
+    </div>
+    <div class="flow">
+      <div class="step"><div class="step-n">1</div><div><h3>As câmeras abrem no navegador</h3><p>Cada câmera vira uma célula com nome de ambiente. O vídeo fica no computador: não há servidor, upload nem gravação.</p></div></div>
+      <div class="step"><div class="step-n">2</div><div><h3>Um detector lê cada quadro</h3><p>Rostos (MediaPipe BlazeFace) nos modos de plateia; corpos inteiros (EfficientDet-Lite0) no modo Segurança. Pra alcançar o fundo da sala, a imagem é varrida por zonas em rodízio, uma câmera por volta, e o alcance se ajusta sozinho se a máquina for lenta.</p></div></div>
+      <div class="step"><div class="step-n">3</div><div><h3>Cada rosto vira um "track" com memória</h3><p>O app acompanha a mesma pessoa de um quadro pro outro, calibra a posição neutra da cabeça de cada uma nos primeiros segundos e só então julga: cabeça baixa, virado pro lado, sumiu, parado, sem colete.</p></div></div>
+      <div class="step"><div class="step-n">4</div><div><h3>A regra do modo decide quando avisar</h3><p>Cada modo tem um tempo de tolerância (ex.: 10 s sem olhar pra frente, 15 s sem EPI, 5 min parado). Passou do tempo, sai um aviso, uma vez por episódio, respeitando um intervalo mínimo entre avisos.</p></div></div>
+      <div class="step"><div class="step-n">5</div><div><h3>O aviso diz quem e onde</h3><p>Por voz ("Fileira 2, cadeira 3: cabeça baixa há mais de 10 segundos"), apito ou só na tela. Com postos mapeados o aviso usa o nome do lugar; com reconhecimento facial ligado (opcional, só com consentimento), o nome da pessoa.</p></div></div>
+      <div class="step"><div class="step-n">6</div><div><h3>Tudo vira relatório</h3><p>Taxa e nota da sessão, curva com pontos de queda, alerta da sala inteira, mapa de calor por fileira/cadeira, presença (entradas, saídas, pico), ruído e gritos, CSV pro Excel, impressão/PDF e histórico de sessões guardado no navegador.</p></div></div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2><span class="num">02</span>Os seis modos</h2>
+    <div class="grid">
+      <div class="card"><span class="tag">aula · palestra</span><h3>Atenção</h3><p>Marca quem fica sem olhar pra frente (cabeça baixa, virado ou que sumiu) por mais de X segundos e avisa a posição.</p></div>
+      <div class="card"><span class="tag">mão na massa</span><h3>Exercício</h3><p>O inverso: todo mundo deveria estar no notebook. Quem fica de frente pra câmera tempo demais está fora do exercício.</p></div>
+      <div class="card"><span class="tag">escritório</span><h3>Produtividade</h3><p>Percentual de foco de cada pessoa ao longo do tempo, com ranking de quem mais dispersou.</p></div>
+      <div class="card"><span class="tag">bem-estar</span><h3>Postura</h3><p>Avisa quem está parado na mesma posição há tempo demais: hora de alongar.</p></div>
+      <div class="card"><span class="tag">evento · sala</span><h3>Presença</h3><p>Quantas pessoas agora, pico, média, entradas e saídas e o horário do pico.</p></div>
+      <div class="card"><span class="tag">indústria · obra</span><h3>Segurança (EPI)</h3><p>Detecta pessoas e lê colete de alta visibilidade (e, opcionalmente, capacete) por cor no torso e no topo. Sem EPI por X segundos vira aviso; conformidade entra no relatório.</p></div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2><span class="num">03</span>Quem é quem, em três camadas</h2>
+    <div class="grid">
+      <div class="card"><h3>Fileira e cadeira (automático)</h3><p>Estimativa geométrica pela posição no quadro: embaixo é a fileira 1, cadeiras contadas da esquerda. Funciona sem configurar nada.</p></div>
+      <div class="card"><h3>Postos e assentos (mapa por câmera)</h3><p>Arraste um retângulo sobre cada lugar e dê um nome ("Mesa da Ana", "Posto 3"). Fica salvo no navegador e entra nos avisos e nas estatísticas. Sem biometria.</p></div>
+      <div class="card"><h3>Reconhecimento facial (opt-in)</h3><p>Só liga com a caixa de consentimento marcada (rosto é dado sensível, LGPD art. 11). A pessoa se cadastra na frente da câmera; fica só uma assinatura numérica, neste computador, apagável na hora.</p></div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2><span class="num">04</span>Privacidade por desenho</h2>
+    <p class="priv"><strong>Nada sai da máquina.</strong> Os modelos de visão estão embarcados no próprio app (nenhum download em tempo de execução), o vídeo nunca é gravado nem enviado, e o relatório guarda só números e textos de aviso. O reconhecimento facial é desligado por padrão, exige consentimento explícito e guarda apenas uma assinatura numérica do rosto, sem foto. O medidor de ruído usa só o nível do microfone, nada de áudio.</p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2><span class="num">05</span>Rodar na sua máquina</h2>
+    <p class="lead" style="margin-bottom:14px">É um site estático: qualquer servidor de arquivos serve. A câmera exige HTTPS ou <code>localhost</code>.</p>
+<pre>git clone https://github.com/ericlucianoferreira/radar-plateia
+cd radar-plateia/web
+python -m http.server 8790        # ou: npx serve .
+# abra http://localhost:8790
+
+npm test                          # testes do motor (funções puras)
+python tests/e2e/run_all.py       # ponta a ponta com câmera falsa (precisa de Playwright + ffmpeg)</pre>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2><span class="num">06</span>Stack</h2>
+    <div class="pills">
+      <span class="pill">HTML + JavaScript puro (sem framework, sem build)</span>
+      <span class="pill">MediaPipe Tasks Vision (WASM/WebGL)</span>
+      <span class="pill">BlazeFace · EfficientDet-Lite0</span>
+      <span class="pill">face-api (TensorFlow.js) — opt-in</span>
+      <span class="pill">Web Speech · WebAudio</span>
+      <span class="pill">IndexedDB · localStorage</span>
+      <span class="pill">Node test runner · Playwright</span>
+      <span class="pill">MIT</span>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap footer-grid">
+    <div class="footer-note">Feito por Eric Luciano na <a href="https://expertintegrado.com.br">Expert Integrado</a> — IA aplicada a negócios. Nasceu ao vivo numa imersão e virou ferramenta da Mentoria Automações Inteligentes.</div>
+    <div class="footer-note"><a href="https://github.com/ericlucianoferreira/radar-plateia">Código no GitHub</a></div>
+  </div>
+</footer>
+
+</body>
+</html>
