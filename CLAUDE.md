@@ -7,7 +7,12 @@ Objetivo: app local que filma a plateia de um evento pela webcam e AVISA POR VOZ
 Port completo pro navegador (pedido do Eric 01/09/2026, ao vivo): SPA estatica em `web/` — HTML+JS puro, MediaPipe tasks-vision VENDORIZADO (wasm + blaze_face_short_range.tflite em `web/vendor/`, ~23MB, nada baixa de CDN e NENHUMA imagem sai da maquina). 5 modos clicaveis sobre o mesmo engine (Atencao, Exercicio, Produtividade, Postura, Presenca), aviso configuravel (voz speechSynthesis / apito WebAudio / silencioso), segundos da regra por modo, gap, volume, seletor de camera, espelho. Config persiste em localStorage (`radar.cfg.v1`). Hook de teste automatizado: `window.__radar.estado` (build, engineOk, tracks, erros).
 - Testar local: servidor estatico com MIME certo pra `.mjs`/`.wasm` (python http.server pode servir .mjs como text/plain e quebrar o import — usar node ou vercel dev).
 - Deploy alvo: Vercel `--prod` + dominio radar.ericluciano.com.br (gate de producao — so com OK do Eric).
-- Auto-degrade: maquina lenta (>150ms/frame) desliga a varredura por tiles sozinha e loga no painel.
+- Auto-degrade: maquina lenta (>180ms por volta) reduz o alcance Longe->Medio->Perto sozinha e loga no painel.
+- **Multi-camera (v3.3, 02/09/2026):** cada camera e uma celula (classe `Cam`) com video/canvas/tracks proprios; detector UNICO compartilhado; loop processa UMA camera por volta em rodizio (custo por volta = 1 camera; cada uma atualiza a cada N voltas — os timers sao por relogio, entao nao perde). Contadores somam todas; aviso falado prefixa o nome da camera quando ha mais de uma; fileira/cadeira e por camera. Config das celulas (deviceId + nome) persiste em `radar.cfg.v1.cams`.
+- Deteccao pre-reduz cada regiao a 512px antes do modelo (ele reduz pra 128px internamente — zero perda de alcance, muito menos custo de copia). 2 cameras 1080p em Longe: ~16 voltas/s no PC do Eric (antes: 2-3).
+- Score gate: track com score medio < 0.38 e "suspeito" (tracejado, nao conta, nao avisa, nao vira ghost). Nasceu de um falso rosto na parede de madeira da sala do Eric que virou "SUMIU" e ia gerar aviso falado falso.
+- Camera IP/CFTV (RTSP) NAO entra no navegador — so UVC/USB, placa de captura HDMI-USB e cameras virtuais (OBS, NVIDIA Broadcast). Predio com varias cameras IP = versao servidor (avaliar Frigate como base; nota Brain 2ab6nhavyolr).
+- Teste real: `scratchpad/test_multicam_real.py` (Chrome visivel, `--use-fake-ui-for-media-stream`, webcams reais) e `test_multicam_fake.py` (2 celulas na mesma camera falsa). Chromium com `--use-file-for-fake-video-capture` aceita 2 consumidores do mesmo arquivo.
 
 ## Escopo
 - Deteccao de rosto MediaPipe full-range + varredura em 4 quadrantes (tiles) pra pegar rosto pequeno no fundo da sala.

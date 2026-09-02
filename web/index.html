@@ -11,7 +11,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="styles.css">
 </head>
-<body data-build="RADAR_V3_BUILD_20260902C">
+<body data-build="RADAR_V3_BUILD_20260902D">
 
 <header class="topo">
   <div class="marca">
@@ -33,13 +33,12 @@
   <section class="painel feed-painel">
     <div class="contadores" id="contadores"></div>
     <div class="feed-wrap" id="feed-wrap">
-      <video id="video" playsinline muted></video>
-      <canvas id="overlay"></canvas>
+      <div class="feeds" id="feeds" data-n="1"></div>
       <div class="canto c1"></div><div class="canto c2"></div><div class="canto c3"></div><div class="canto c4"></div>
       <div class="feed-vazio" id="feed-vazio">
         <div class="radar-logo grande"><div class="sweep"></div></div>
-        <p id="feed-msg">Escolha o modo, ajuste os avisos e clique em <strong>Ligar c&acirc;mera</strong>.</p>
-        <button class="btn-principal" id="btn-ligar">Ligar c&acirc;mera</button>
+        <p id="feed-msg">Escolha o modo, ajuste os avisos e clique em <strong>Ligar c&acirc;meras</strong>. Quer vigiar mais de um ambiente? Adicione c&acirc;meras no painel ao lado.</p>
+        <button class="btn-principal" id="btn-ligar">Ligar c&acirc;meras</button>
       </div>
       <button class="btn-tela-cheia" id="btn-fs" title="Tela cheia" hidden>&#x26F6;</button>
     </div>
@@ -85,14 +84,15 @@
         </div>
         <small class="dica">Longe varre o fundo da sala por zonas (usa mais m&aacute;quina)</small>
       </div>
-      <div class="campo">
-        <label for="sel-camera">C&acirc;mera</label>
-        <select id="sel-camera"><option value="">padr&atilde;o do sistema</option></select>
-      </div>
       <div class="campo linha-fim">
         <label class="check"><input type="checkbox" id="chk-espelho"> Espelhar imagem <small>(s&oacute; visual)</small></label>
         <button class="btn-secundario" id="btn-parar" hidden>Parar</button>
       </div>
+    </section>
+
+    <section class="painel">
+      <h2>C&acirc;meras <button class="btn-limpar" id="btn-add-cam" title="Adicionar mais uma c&acirc;mera">+ adicionar</button></h2>
+      <p class="dica">Cada c&acirc;mera vira uma c&eacute;lula na tela: escolha o aparelho e d&ecirc; o nome do ambiente (ex.: "Sala 2"). Os avisos falam o nome da c&acirc;mera; os contadores somam todas.</p>
     </section>
 
     <section class="painel" id="painel-stats" hidden>
