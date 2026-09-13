@@ -4,7 +4,7 @@ App de navegador que lê a câmera **dentro do próprio computador** e transform
 relatório: quem está sem olhar pra frente numa aula, quem saiu do exercício, quanto foco há num escritório, quantas
 pessoas estão na sala e quem está sem colete numa fábrica. Nenhuma imagem sai da máquina.
 
-**[→ Como funciona o Radar da Plateia](https://ericlucianoferreira.github.io/radar-plateia/)** — a página do projeto, com o sistema explicado visualmente.
+**[→ Como funciona o Radar da Plateia](https://ericluciano.github.io/radar-plateia/)** — a página do projeto, com o sistema explicado visualmente.
 
 App no ar: **[radar.ericluciano.com.br](https://radar.ericluciano.com.br)** (é só abrir e liberar a câmera; nada é enviado).
 
@@ -26,7 +26,7 @@ App no ar: **[radar.ericluciano.com.br](https://radar.ericluciano.com.br)** (é 
 É um site estático (`web/`): qualquer servidor de arquivos serve. A câmera exige HTTPS ou `localhost`.
 
 ```bash
-git clone https://github.com/ericlucianoferreira/radar-plateia
+git clone https://github.com/ericluciano/radar-plateia
 cd radar-plateia/web
 python -m http.server 8790     # ou: npx serve .
 # abra http://localhost:8790
