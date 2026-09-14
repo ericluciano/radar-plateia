@@ -1,5 +1,7 @@
 # radar-plateia
 
+> Repositorio canonico: github.com/ericluciano/radar-plateia (transferido em 13/09/2026)
+
 Objetivo: app local que filma a plateia de um evento pela webcam e AVISA POR VOZ no PC quando alguem fica 10s+ sem olhar pra frente (cabeca baixa, virado pro lado ou rosto que some), falando a posicao estimada ("fileira X, cadeira Y contando da esquerda do Eric"). Pedido do Eric ao vivo na Imersao 01/09/2026. v1 apitava; Eric mandou matar o apito (irritante) e trocar por voz com posicao — regra de 10s.
 
 ## v3 — app web (`web/`)
